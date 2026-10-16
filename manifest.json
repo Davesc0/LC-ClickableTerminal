@@ -1,0 +1,9 @@
+{
+    "name": "ClickableTerminal",
+    "version_number": "0.1.0",
+    "website_url": "https://github.com/Davesc0/LC-ClickableTerminal",
+    "description": "Interactive terminal with mouse and controller support.",
+    "dependencies": [
+        "BepInEx-BepInExPack-5.4.2100"
+    ]
+}
