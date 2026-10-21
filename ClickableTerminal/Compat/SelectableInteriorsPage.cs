@@ -6,8 +6,6 @@ using HarmonyLib;
 
 namespace ClickableTerminal
 {
-    // Selectable Interiors prints its interiors as a list of names and numbers to type back in.
-    // Here each one is a row to click.
     internal static class SelectableInteriorsPage
     {
         internal const string Guid = "NoteBoxz.SelectableInteriors";
@@ -15,10 +13,10 @@ namespace ClickableTerminal
 
         private const string SetCommand = "setinside ";
 
-        // "Forcing Interior Mineshaft (4) to be loaded!", what the mod answers to "setinside 4".
+        // "Forcing Interior Mineshaft (4) to be loaded!", the answer to "setinside 4".
         private static readonly Regex Answer = new Regex(@"^Forcing Interior (.+) \((\d+)\) to be loaded", RegexOptions.Compiled);
 
-        // What was clicked last, for when the mod's own state cannot be read.
+        // For when the mod's own state cannot be read.
         private static string clicked;
 
         internal static bool Owns(string key)
@@ -34,7 +32,7 @@ namespace ClickableTerminal
                 return null;
             }
 
-            var page = new MenuPage { Title = "INTERIORS" };
+            var page = Navigator.MenuLook(terminal, new MenuPage { Title = "INTERIORS" });
             var rows = new SortedDictionary<int, MenuEntry>();
             var extra = new List<MenuEntry>();
             var now = "none";
@@ -87,7 +85,6 @@ namespace ClickableTerminal
             return page;
         }
 
-        // The list stays where it is: the mod's one line answer is skipped and the mark moves to the new pick.
         private static MenuEntry Row(Terminal terminal, string name, string command, Func<bool> picked)
         {
             return new MenuEntry

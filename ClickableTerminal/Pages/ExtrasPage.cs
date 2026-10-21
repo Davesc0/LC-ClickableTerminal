@@ -1,42 +1,63 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // Things on the ship that have a button of their own somewhere, pressed from the terminal instead.
     internal static class ExtrasPage
     {
         internal static MenuPage Build(Terminal terminal)
         {
-            var round = StartOfRound.Instance;
-            if (round == null)
+            var entries = Entries(terminal);
+            if (entries.Count == 0)
             {
                 return null;
             }
 
-            var page = new MenuPage { Title = "EXTRAS" };
+            var page = Navigator.MenuLook(terminal, new MenuPage { Title = "EXTRAS", Subtitle = "Ship controls" });
+            page.Entries.AddRange(entries);
+            return page;
+        }
 
-            page.Entries.Add(new MenuEntry
+        internal static List<MenuEntry> Entries(Terminal terminal)
+        {
+            var round = StartOfRound.Instance;
+            var entries = new List<MenuEntry>();
+            if (round == null)
+            {
+                return entries;
+            }
+
+            void Add(MenuEntry entry, string text)
+            {
+                var name = entry.Label;
+                var state = entry.LiveCells;
+                entry.LiveCells = null;
+                if (state != null)
+                {
+                    entry.LiveLabel = () => name + ": " + state()[0];
+                    entry.Label = entry.LiveLabel();
+                }
+
+                entry.Description = text;
+                entries.Add(entry);
+            }
+
+            Add(new MenuEntry
             {
                 Label = "SHIP DOORS",
-                LiveLabel = () => "SHIP DOORS  " + (round.hangarDoorsClosed ? "(closed)" : "(open)"),
-                Description = "Open or close the ship's doors. Only while landed.",
+                LiveCells = () => new[] { !round.shipHasLanded ? "LOCKED" : round.hangarDoorsClosed ? "CLOSED" : "OPEN" },
                 Click = ToggleDoors
-            });
+            }, "Open or close the ship's doors. Only while landed.");
 
             foreach (var teleporter in UnityEngine.Object.FindObjectsOfType<ShipTeleporter>().OrderBy(found => found.isInverseTeleporter))
             {
                 var device = teleporter;
-                var name = device.isInverseTeleporter ? "INVERSE TELEPORTER" : "TELEPORTER";
-
-                page.Entries.Add(new MenuEntry
+                Add(new MenuEntry
                 {
-                    Label = name,
-                    LiveLabel = () => device == null || device.buttonTrigger == null || device.buttonTrigger.interactable ? name : name + "  (charging)",
-                    Description = device.isInverseTeleporter
-                        ? "Send whoever stands on it into the building."
-                        : "Bring back the crew member shown on the monitor.",
+                    Label = device.isInverseTeleporter ? "INVERSE TELEPORTER" : "TELEPORTER",
+                    LiveCells = () => new[] { device == null || device.buttonTrigger == null || device.buttonTrigger.interactable ? "READY" : "CHARGING" },
                     Click = () =>
                     {
                         if (device != null && device.buttonTrigger != null && device.buttonTrigger.interactable)
@@ -44,41 +65,40 @@ namespace ClickableTerminal
                             device.PressTeleportButtonOnLocalClient();
                         }
                     }
-                });
+                }, device.isInverseTeleporter
+                    ? "Send whoever stands on it into the building, somewhere random."
+                    : "Bring back the crew member shown on the monitor, without what they hold.");
             }
 
             if (round.shipRoomLights != null)
             {
-                page.Entries.Add(new MenuEntry
+                Add(new MenuEntry
                 {
                     Label = "LIGHTS",
-                    LiveLabel = () => "LIGHTS  " + (round.shipRoomLights.areLightsOn ? "(on)" : "(off)"),
-                    Description = "Switch the lights in the ship.",
+                    LiveCells = () => new[] { round.shipRoomLights.areLightsOn ? "ON" : "OFF" },
                     Click = () => round.shipRoomLights.ToggleShipLights()
-                });
+                }, "Switch the lights in the ship.");
             }
 
-            page.Entries.Add(new MenuEntry
+            Add(new MenuEntry
             {
                 Label = "LEVER",
-                Description = "Pull the ship's lever: land, or take off.",
-                Open = () => LeverPage(terminal)
-            });
+                LiveCells = () => new[] { round.shipHasLanded ? "TAKE OFF" : round.inShipPhase ? "LAND" : "-" },
+                Click = LeverWindow
+            }, "Pull the ship's lever: land, or take off.");
 
-            page.Entries.Add(new MenuEntry
+            Add(new MenuEntry
             {
                 Label = "RANDOM MOON",
-                Description = "Pick one of the moons you can fly to. You still get to confirm.",
-                Click = () =>
-                {
-                    var route = MoonsPage.RandomRoute(terminal);
-                    if (route != null)
-                    {
-                        Commands.Submit(terminal, route);
-                    }
-                }
-            });
-            return page;
+                Click = () => MoonsPage.RandomWindow(terminal)
+            }, "Pick one of the moons you can fly to and afford.");
+
+            if (Settings.Monsters.Value != MonsterDetail.Off)
+            {
+                Add(new MenuEntry { Label = "MONSTERS", Open = MonstersPage.Build }, "What is alive on this moon right now.");
+            }
+
+            return entries;
         }
 
         // The buttons next to the door do more than move it (sound, the others' game), so they are pressed as they are.
@@ -98,56 +118,40 @@ namespace ClickableTerminal
             }
         }
 
-        // Pulling the lever cannot be taken back, so it asks first.
-        private static MenuPage LeverPage(Terminal terminal)
+        private static void LeverWindow()
         {
             var round = StartOfRound.Instance;
             var lever = UnityEngine.Object.FindObjectOfType<StartMatchLever>();
-            var page = new MenuPage { Title = "LEVER", Plain = true };
-            var ready = lever != null && lever.triggerScript != null && lever.triggerScript.interactable;
+            var ready = round != null && lever != null && lever.triggerScript != null && lever.triggerScript.interactable
+                        && !round.travellingToNewLevel && !round.shipIsLeaving;
 
-            string question;
-            if (!ready || round.travellingToNewLevel || round.shipIsLeaving)
-            {
-                question = null;
-            }
-            else if (round.shipHasLanded)
+            string question = null;
+            if (ready && round.shipHasLanded)
             {
                 question = "Take off and leave this moon?";
             }
-            else if (round.inShipPhase && round.currentLevel != null)
+            else if (ready && round.inShipPhase && round.currentLevel != null)
             {
                 question = "Land on " + MoonsPage.NameOf(round.currentLevel) + "?";
             }
-            else
-            {
-                question = null;
-            }
 
-            page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
-
-            if (question == null)
+            var window = new Window { Title = "LEVER", Text = question ?? "The lever cannot be pulled right now." };
+            if (question != null)
             {
-                page.Entries.Add(new MenuEntry { Label = "The lever cannot be pulled right now.", Big = true });
-                page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
-                page.Entries.Add(new MenuEntry { Label = "[ BACK ]", Click = () => Navigator.Back(terminal) });
-                return page;
-            }
-
-            page.Entries.Add(new MenuEntry { Label = question, Big = true });
-            page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
-            page.Entries.Add(new MenuEntry
-            {
-                Label = "[ CONFIRM ]",
-                Click = () =>
+                window.Buttons.Add(new ToolButton
                 {
-                    Navigator.Back(terminal);
-                    lever.LeverAnimation();
-                    lever.PullLever();
-                }
-            });
-            page.Entries.Add(new MenuEntry { Label = "[ DENY ]", Click = () => Navigator.Back(terminal) });
-            return page;
+                    Label = round.shipHasLanded ? "TAKE OFF" : "LAND",
+                    Click = () =>
+                    {
+                        Window.Close();
+                        lever.LeverAnimation();
+                        lever.PullLever();
+                    }
+                });
+            }
+
+            window.Buttons.Add(new ToolButton { Label = question != null ? "CANCEL" : "OK", Click = Window.Close });
+            Window.Show(window);
         }
     }
 }

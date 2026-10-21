@@ -5,17 +5,16 @@ using System.Reflection;
 
 namespace ClickableTerminal
 {
-    // Sorts store items into categories, the way Terminal Restyle does:
-    // vanilla item class first, then words in the item or script name, then what the script's own fields are called.
+    // The way Terminal Restyle does it: vanilla item class first, then words in the names, then the script's field
+    // names.
     internal static class ItemCategories
     {
         internal const string Other = "OTHER";
 
-        // Places for categories in the config. The first ones come filled in, the last ones are left free.
         internal const int Slots = 15;
 
-        // What each place starts out as. The rules below that look at an item's code are tied to the place,
-        // so a renamed category keeps them and an emptied one drops them.
+        // The rules that look at an item's code are tied to the slot, so a renamed category keeps them and an emptied
+        // one drops them.
         private static readonly string[] Builtin =
         {
             "LIGHTING", "MELEE", "FIREARMS", "TOOL GUNS", "AMMO", "TACTICAL", "HAZARD CONTROL",
@@ -48,7 +47,7 @@ namespace ClickableTerminal
             ("TACTICAL", new[] { "stungrenade", "flashbang", "smokebomb", "grenade", "explosive", "dynamite", "molotov", "decoy", "landmine", "bomb" }),
             ("HAZARD CONTROL", new[] { "weedkiller", "insecticide", "pesticide", "herbicide", "repellent", "deterrent", "exterminat", "snaptrap", "gluetrap", "rattrap", "catfood", "poison", "begone", "deroot", "reaper", "burner", "antidote", "bait", "trap" }),
             ("MOBILITY", new[] { "autoinjector", "adrenaline", "parachute", "hookshot", "jetwings", "stimulant", "jetpack", "grapple", "zipline", "inhalant", "injector", "glider", "boots", "tzp" }),
-            ("MEDICAL", new[] { "defibrillator", "medicalkit", "painkiller", "antiseptic", "healthpack", "stimpack", "firstaid", "bandage", "medical", "medkit", "syringe", "gauze" }),
+            ("MEDICAL", new[] { "defibrillator", "medicalkit", "painkiller", "antiseptic", "healthpack", "stimpack", "firstaid", "bandage", "medical", "medkit", "syringe", "gauze", "morphine", "epinephrine", "antibiotic" }),
             ("STORAGE", new[] { "utilitybelt", "storingunit", "storageunit", "scrapsack", "backpack", "beltbag", "container", "cupboard", "satchel", "storage", "locker", "pouch", "crate", "chest", "sack" }),
             ("COMMS", new[] { "tuningcylinder", "talkiewalker", "walkietalkie", "transmitter", "microphone", "megaphone", "intercom", "boombox", "receiver", "headset", "jukebox", "speaker", "walkie", "pinger", "radio" }),
             ("SENSORS", new[] { "strangedevice", "radarbooster", "remoteradar", "nightvision", "binocular", "detector", "recorder", "monocle", "scanpad", "scanner", "compass", "thermal", "geiger", "camera", "sonar", "radar", "meter", "scan" }),
@@ -66,7 +65,6 @@ namespace ClickableTerminal
 
         private static readonly Dictionary<Item, string> Cache = new Dictionary<Item, string>();
 
-        // The config lists, read once and kept until a setting changes.
         private static List<(string Category, string[] Words)> keywords;
         private static Dictionary<string, string> named;
         private static string[] names;
@@ -90,14 +88,12 @@ namespace ClickableTerminal
             return string.Join(", ", DefaultKeywords.FirstOrDefault(entry => entry.Category == category).Words ?? new string[0]);
         }
 
-        // The categories as the store lists them: the config's order, each name once, OTHER last.
         internal static IEnumerable<string> Order()
         {
             ReadConfig();
             return names.Where(name => name.Length > 0).Distinct().Concat(new[] { Other });
         }
 
-        // The name a built-in category goes by now, null when its place has been emptied.
         private static string Named(string builtin)
         {
             if (builtin == null)
@@ -109,7 +105,7 @@ namespace ClickableTerminal
             return slot >= 0 && names[slot].Length > 0 ? names[slot] : null;
         }
 
-        // Items nothing gives away: neither the name nor the code says what a "Karma-1" is.
+        // Neither the name nor the code says what a "Karma-1" is.
         internal static string DefaultItems(int slot)
         {
             switch (DefaultName(slot))
@@ -175,7 +171,6 @@ namespace ClickableTerminal
         {
             ReadConfig();
 
-            // A name written into the config has the last word.
             if (named.TryGetValue(Squash(item.itemName), out var forced))
             {
                 return forced;
@@ -222,7 +217,7 @@ namespace ClickableTerminal
                 : TypeMap.FirstOrDefault(entry => entry.Types.Any(type => type.IsInstanceOfType(script))).Category;
         }
 
-        // The longest matching word wins: "flaregun" beats "flare" and "gun".
+        // "flaregun" beats "flare" and "gun".
         private static string KeywordMatch(string text)
         {
             var haystack = Squash(text);
@@ -249,7 +244,7 @@ namespace ClickableTerminal
             return best;
         }
 
-        // A script with Magazine, Reload and MuzzleFlash fields is a firearm whatever the item is called.
+        // Magazine, Reload and MuzzleFlash fields make a firearm, whatever the item is called.
         private static string Signature(GrabbableObject script)
         {
             if (script == null)

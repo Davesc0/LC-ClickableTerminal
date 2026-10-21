@@ -6,8 +6,6 @@ using HarmonyLib;
 
 namespace ClickableTerminal
 {
-    // StoreRotationConfig decides which decorations and suits are on sale and puts some of them on discount.
-    // While it is installed the choice is left to it, and its discounts are shown on our store pages.
     internal static class StoreRotationCompat
     {
         internal const string Guid = "pacoito.StoreRotationConfig";
@@ -18,8 +16,7 @@ namespace ClickableTerminal
 
         internal static bool Installed => Chainloader.PluginInfos.ContainsKey(Guid);
 
-        // The discount in percent on a decoration or suit of the current selection, 0 when there is none.
-        // Its list runs in the same order as the game's selection, so the place in one is the place in the other.
+        // Its list runs in the same order as the game's selection, so the index matches.
         internal static int Discount(Terminal terminal, TerminalNode node)
         {
             if (node == null || terminal.ShipDecorSelection == null || !Installed)
@@ -60,7 +57,7 @@ namespace ClickableTerminal
             return 0;
         }
 
-        // The price it charges: its own formula, rounded the way it rounds.
+        // Its own formula and rounding.
         internal static int PriceAfter(int price, int discount)
         {
             return price - (int)(price * (discount / 100f));

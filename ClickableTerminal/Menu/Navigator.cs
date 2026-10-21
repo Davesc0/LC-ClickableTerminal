@@ -9,32 +9,19 @@ namespace ClickableTerminal
     {
         internal TerminalNode Node;
         internal bool IsHome;
-
-        // Null for a text view: the game's own page is shown as it is.
         internal MenuPage Page;
         internal Func<MenuPage> Builder;
-
-        // A page that only exists on our side, opened from another page of ours.
         internal bool Virtual;
-
-        // Set on pages that only wait for the player (the welcome text): where CONTINUE leads.
+        internal bool Generic;
         internal TerminalNode ContinueTo;
-
-        // Set on the page after a confirmation ("Ordered 4 flashlights..."): the button that leads back.
         internal string ReturnLabel;
-
-        // A page that asks for an answer. Once answered it is not a place to come back to.
         internal bool Question;
 
-        // What to answer when the player walks away from the question instead. A mod that reads the answer
-        // itself keeps waiting for it otherwise, and takes the next command for one.
+        // A mod that reads the answer itself keeps waiting otherwise, and takes the next command as the answer.
         internal string Leave;
-
         internal string ButtonLabel => ContinueTo != null ? "[ CONTINUE ]" : ReturnLabel;
     }
 
-    // Keeps track of where the player has been, so there is a way back,
-    // and decides which of the game's pages are replaced by one of ours.
     internal static class Navigator
     {
         private const int HelpNode = 13;
@@ -46,8 +33,9 @@ namespace ClickableTerminal
         private static bool goingBack;
         private static bool inApplication;
 
-        // What was last sent to the terminal, typed or clicked.
         internal static string Submitted;
+
+        internal static string LastApplication;
         internal static bool LeaveToMenu;
 
         internal static View Current => History.Count > 0 ? History[History.Count - 1] : null;
@@ -59,15 +47,14 @@ namespace ClickableTerminal
             left = null;
         }
 
-        // The pages the player had open when they stepped away from the terminal.
         private static List<View> left;
 
         internal static void Remember()
         {
             left = new List<View>(History);
 
-            // A question, or a page that only makes sense while a mod waits for an answer, is not one to come back to.
-            // Nor is a page whose loading does something (a switch of the monitor, an eject).
+            // Questions, and pages whose loading does something (a monitor switch, an eject), are not places to come
+            // back to.
             while (left.Count > 1)
             {
                 var last = left[left.Count - 1];
@@ -80,7 +67,6 @@ namespace ClickableTerminal
             }
         }
 
-        // Right after the game has opened the terminal on its own first page.
         internal static void Reopen(Terminal terminal)
         {
             if (!Settings.RememberLastPage.Value || left == null || left.Count < 2)
@@ -93,8 +79,7 @@ namespace ClickableTerminal
             Restore(terminal);
         }
 
-        // Pages the game goes through while something is done for the player in one go (the cart's order)
-        // are none of the player's steps: nothing of them is kept.
+        // The pages the game goes through while we order the cart are not the player's steps.
         internal static void Quietly(Action work)
         {
             quiet = true;
@@ -117,19 +102,21 @@ namespace ClickableTerminal
                 return;
             }
 
+            var fromOurs = !goingBack && Current != null && Current.Page != null && !Current.Question;
+
             var help = Special(terminal, HelpNode);
 
-            // The Interactive Terminal API answers the command that starts an application with the help page,
-            // and loads that page once more when the application closes. Neither is the player going to the
-            // main menu: the page the application was started from stays where it is, and comes back after.
+            // The Interactive Terminal API answers an app's start command with the help page and loads it again when the
+            // app closes. Neither is the player going to the main menu.
             if (!goingBack && node == help && History.Count > 0)
             {
-                // While it starts, its object is in the scene but not yet announced. While it closes, it still is.
+                // While it starts its object is in the scene but not announced yet. While it closes, it still is.
                 var running = InteractiveTerminal.Running();
                 var starting = !running && (InteractiveTerminal.Registered(Submitted ?? "") != null || GameObject.Find("InteractiveTerminal") != null);
 
                 if (starting)
                 {
+                    LastApplication = Submitted;
                     Submitted = null;
                     inApplication = true;
                     return;
@@ -139,7 +126,6 @@ namespace ClickableTerminal
                 {
                     inApplication = false;
 
-                    // Closed with MENU, the main menu is where it should end up after all.
                     if (!LeaveToMenu)
                     {
                         Restore(terminal);
@@ -161,25 +147,55 @@ namespace ClickableTerminal
             var answered = !goingBack && History.Count > 1 && asked.Node != null
                            && asked.Question && asked.Node != node;
 
-            // DENY on a confirmation page: nothing happened, so straight back to where the player came from.
             if (answered && asked.Node.overrideOptions && IsDenial(asked.Node, node))
             {
                 Back(terminal);
                 return;
             }
 
-            // Some pages are printed under what was on the screen before. Coming from a page of ours
-            // that would be text the player never saw, so only the new page is kept.
+            // Some pages print under what was on screen before. Coming from our page, that is text the player never saw.
             if (!goingBack && !node.clearPreviousText && (answered || (asked != null && asked.Page != null)))
             {
                 Commands.ShowOnly(terminal, node);
             }
 
             var view = ViewFor(terminal, node, help, answered);
+            Plugin.Debug($"Page loaded: {node.name} (keyword {KeywordOf(terminal, node) ?? "-"}, typed \"{Submitted}\"), {(view.Page != null || view.Builder != null ? "our page" : "game text")}");
+
+            if (fromOurs && view.Question)
+            {
+                var question = Window.Tidy(terminal.screenText.text, "");
+                // Closing without an answer denies, or the game would take the next command as the answer.
+                var window = new Window { Title = "CONFIRM", Text = question, Closing = () => Commands.Ask(terminal, "deny") };
+                window.Buttons.Add(new ToolButton
+                {
+                    Label = "CONFIRM",
+                    Click = () =>
+                    {
+                        Window.Drop();
+                        var answer = Commands.Ask(terminal, "confirm");
+                        Window.Show(new Window { Title = "CONFIRM", Text = Window.Tidy(answer, "") });
+                        Rebuild(terminal);
+                    }
+                });
+                window.Buttons.Add(new ToolButton
+                {
+                    Label = "DENY",
+                    Click = Window.Close
+                });
+                Window.Show(window);
+                return;
+            }
+
+            if (fromOurs && view.Generic && !view.Question && IsShortAnswer(terminal, node))
+            {
+                Window.Show(new Window { Title = "TERMINAL", Text = Window.Tidy(Commands.PageText(terminal, node), "") });
+                Rebuild(terminal);
+                return;
+            }
 
             if (goingBack)
             {
-                // Coming back to a page the game knows nothing about: it is still ours to draw.
                 if (History.Count > 0 && Current.Virtual)
                 {
                     Rebuild(terminal);
@@ -199,7 +215,6 @@ namespace ClickableTerminal
                 return;
             }
 
-            // The main menu and the welcome text are where everything starts from.
             if (node == help || node == Special(terminal, WelcomeNode))
             {
                 History.Clear();
@@ -212,7 +227,6 @@ namespace ClickableTerminal
                 History.Add(new View { IsHome = true, Node = help });
             }
 
-            // A confirmation page is not a place to come back to.
             if (answered)
             {
                 History.RemoveAt(History.Count - 1);
@@ -243,7 +257,7 @@ namespace ClickableTerminal
             Dismiss(terminal);
             History.RemoveAt(History.Count - 1);
 
-            // Loading a page again also runs its event again (eject, the monitor switch...), so those are skipped.
+            // Loading a page again runs its event again (eject, the monitor switch), so those are skipped.
             while (History.Count > 1 && Current.Node != null && !string.IsNullOrEmpty(Current.Node.terminalEvent))
             {
                 History.RemoveAt(History.Count - 1);
@@ -266,7 +280,6 @@ namespace ClickableTerminal
             }
         }
 
-        // Puts the page on top of the pile back on screen, the way BACK would land on it.
         private static void Restore(Terminal terminal)
         {
             if (Current == null)
@@ -297,7 +310,6 @@ namespace ClickableTerminal
             }
         }
 
-        // The answer goes in as if typed. What the mod says to it takes the question's place on the pile.
         private static void Dismiss(Terminal terminal)
         {
             var view = Current;
@@ -321,7 +333,6 @@ namespace ClickableTerminal
             }
         }
 
-        // A page that exists only on our side, like the list of names under SWITCH. The game stays on the page it was on.
         internal static void Open(Func<MenuPage> builder)
         {
             var page = Try(builder);
@@ -331,7 +342,6 @@ namespace ClickableTerminal
             }
         }
 
-        // Takes a page of ours off the pile without loading anything, for a form that hands over to the game.
         internal static void DropCurrent()
         {
             if (History.Count > 1 && Current.Virtual)
@@ -352,8 +362,6 @@ namespace ClickableTerminal
             }
         }
 
-        // A page of the game's text opened from one of our lists (an info page, the answer to a purchase)
-        // gets a button that says where it leads back to.
         private static void LabelReturn(View view, View before, bool answered)
         {
             if (view.Page != null || view.ContinueTo != null || view.Question)
@@ -371,7 +379,6 @@ namespace ClickableTerminal
             }
         }
 
-        // The title of the page a new page was opened from, for its "back to" button.
         private static string ReturnTitle()
         {
             for (var i = History.Count - (goingBack ? 2 : 1); i >= 0; i--)
@@ -406,7 +413,6 @@ namespace ClickableTerminal
             return false;
         }
 
-        // After a sort or a filter click: the same page, drawn again from the game's data.
         internal static void Rebuild(Terminal terminal)
         {
             var view = Current;
@@ -422,7 +428,7 @@ namespace ClickableTerminal
             }
         }
 
-        // Straight to the page, without the parser. That is the only way out of a confirmation page.
+        // Skips the parser. That is the only way out of a confirmation page.
         private static void Load(Terminal terminal, TerminalNode node)
         {
             terminal.LoadNewNode(node);
@@ -441,14 +447,13 @@ namespace ClickableTerminal
 
             if (node == help)
             {
-                // Read now, while the page is still what the game has just printed.
+                // Read now, while the screen still holds what the game has just printed.
                 var parsed = HelpParser.Parse(terminal.screenText.text);
                 var entries = parsed.FindAll(KnownCommands.IsVanillaMain);
 
-                // Whatever a mod has added goes on one page, last on the menu. What it wrote onto the menu itself comes along.
                 var advertised = parsed.FindAll(entry => !KnownCommands.IsVanillaMain(entry) && !KnownCommands.IsHidden(entry.Command ?? entry.Prefill));
                 Func<MenuPage> extras = () => ExtrasPage.Build(terminal);
-                if (entries.Count > 0 && Settings.ShowExtras.Value)
+                if (entries.Count > 0 && Settings.Extras.Value == ExtrasPlace.OwnPage)
                 {
                     entries.Add(new MenuEntry { Label = "EXTRAS", Description = "To see some extra commands.", Open = extras });
                 }
@@ -462,7 +467,7 @@ namespace ClickableTerminal
                 if (entries.Count > 0)
                 {
                     view.IsHome = true;
-                    view.Page = new MenuPage { Title = "MAIN MENU", Entries = entries };
+                    view.Page = MenuLook(terminal, new MenuPage { Title = "MAIN MENU", Entries = entries });
                 }
 
                 return view;
@@ -493,12 +498,11 @@ namespace ClickableTerminal
                 }
             }
 
-            // A page that takes no answer is not a question, whatever it is marked as (a mod's own receipt).
-            // Nor is one that does not ask: a mod can put its refusal on the page of the question it replaced.
+            // A page that takes no answer is not a question, whatever it is marked as. A mod can also put its refusal on
+            // the question's page.
             var asked = terminal.screenText.text;
             if (answers.Count > 0 && answers.Exists(answer => asked.IndexOf(answer, StringComparison.OrdinalIgnoreCase) >= 0))
             {
-                // The orders and routes we know get their own form. Any other question keeps its wording and gets the buttons.
                 var question = terminal.screenText.text;
                 view.Question = true;
                 view.Builder = () => ConfirmPage.Build(terminal, node) ?? ResultPages.Question(question, answers);
@@ -516,8 +520,8 @@ namespace ClickableTerminal
                 return view;
             }
 
-            // A mod asking the same way without the game's own mechanism behind it: it reads the answer itself.
-            // Marked as a question is not enough: a refusal shown in a question's place carries the mark too.
+            // A mod asking without the game's own mechanism reads the answer itself. The mark alone is not enough: a
+            // refusal in a question's place carries it too.
             if (view.Builder == null && (ResultPages.AsksToConfirm(asked)
                                          || (node.isConfirmationNode && asked.IndexOf("confirm", StringComparison.OrdinalIgnoreCase) >= 0)))
             {
@@ -527,7 +531,6 @@ namespace ClickableTerminal
                 view.Builder = () => ResultPages.Question(question, new[] { "confirm", "deny" });
             }
 
-            // Pages the game prints as sentences that read better as figures.
             if (view.Builder == null)
             {
                 var back = ReturnTitle();
@@ -551,8 +554,6 @@ namespace ClickableTerminal
                 }
                 else if (node.displayTexture == null && terminal.displayingPersistentImage == null && ResultPages.IsProse(printed))
                 {
-                    // Messages and descriptions: plain sentences, drawn in the same style as the rest.
-                    // Pages with a picture or a list of their own stay as the game prints them.
                     if (node.creatureFileID >= 0)
                     {
                         view.Builder = () => ResultPages.Creature(terminal, node, printed, back);
@@ -563,6 +564,7 @@ namespace ClickableTerminal
                     }
                     else
                     {
+                        view.Generic = true;
                         view.Builder = () => ResultPages.Document(terminal, printed, back);
                     }
                 }
@@ -571,6 +573,10 @@ namespace ClickableTerminal
             if (view.Builder != null)
             {
                 view.Page = Try(view.Builder);
+            }
+            else
+            {
+                view.Generic = true;
             }
 
             return view;
@@ -582,7 +588,6 @@ namespace ClickableTerminal
             {
                 case "moons":
                     return () => MoonsPage.Build(terminal);
-                // UPGRADES and DECOR are parts of the store in the game, and sections of the same page here.
                 case "store":
                 case "upgrades":
                 case "decor":
@@ -605,7 +610,7 @@ namespace ClickableTerminal
             }
         }
 
-        // A page of ours that fails must never take the terminal down with it: the game's text is still there.
+        // A page of ours that fails must never take the terminal down. The game's text is still there.
         private static MenuPage Try(Func<MenuPage> builder)
         {
             try
@@ -624,23 +629,51 @@ namespace ClickableTerminal
             var page = new MenuPage { Title = "OTHER COMMANDS", Entries = HelpParser.Parse(printed).FindAll(KnownCommands.IsVanillaOther) };
             page.Entries.AddRange(KnownCommands.UnexplainedFor(terminal));
 
+            var radar = page.Entries.FindIndex(entry => entry.Command == "view monitor" || TargetsPage.Handles(entry.Prefill?.Trim()));
+            if (radar >= 0)
+            {
+                page.Entries.RemoveAll(entry => entry.Command == "view monitor" || TargetsPage.Handles(entry.Prefill?.Trim()));
+                page.Entries.Insert(Mathf.Min(radar, page.Entries.Count), new MenuEntry
+                {
+                    Label = "MONITOR",
+                    Description = "The ship's radar: watch the crew, ping boosters, open doors by code.",
+                    Open = () => TargetsPage.MonitorPage(terminal)
+                });
+            }
+
             foreach (var entry in page.Entries)
             {
-                // SWITCH, PING and FLASH want a name. Instead of typing it, the names are listed on a page of their own.
                 var verb = entry.Prefill != null ? entry.Prefill.Trim() : null;
                 if (TargetsPage.Handles(verb))
                 {
-                    entry.Open = () => TargetsPage.Build(verb);
+                    entry.Open = () => TargetsPage.MonitorPage(terminal);
                 }
                 else if (TransmitPage.Handles(verb))
                 {
-                    entry.Open = () => TransmitPage.Build(terminal);
+                    entry.Click = () => TransmitPage.ShowWindow(terminal);
+                }
+                else if (entry.Command == "eject")
+                {
+                    entry.Click = () =>
+                    {
+                        var window = new Window
+                        {
+                            Title = "EJECT THE CREW?",
+                            Text = "Everyone on board is fired out of the airlock and the run starts over. This cannot be undone."
+                        };
+                        window.Buttons.Add(new ToolButton
+                        {
+                            Label = "EJECT",
+                            Click = () => Window.Show(new Window { Title = "EJECT", Text = Window.Tidy(Commands.Ask(terminal, "eject", "confirm"), "") })
+                        });
+                        window.Buttons.Add(new ToolButton { Label = "CANCEL", Click = Window.Close });
+                        Window.Show(window);
+                    };
                 }
                 else if (entry.Command == "view monitor")
                 {
-                    // A switch, not a page: it turns the ship's map on or off on this screen and the list stays.
                     var command = entry.Command;
-                    entry.Label = "VIEW MONITOR  " + (terminal.displayingPersistentImage != null ? "(on)" : "(off)");
+                    entry.Label = "VIEW MONITOR";
                     entry.Click = () =>
                     {
                         var from = Current;
@@ -653,19 +686,40 @@ namespace ClickableTerminal
                 }
             }
 
-            return page.Entries.Count > 0 ? page : null;
+            if (page.Entries.Count == 0)
+            {
+                return null;
+            }
+
+            foreach (var entry in page.Entries)
+            {
+                entry.Label = System.Text.RegularExpressions.Regex.Replace(entry.Label, @"\s*\[[^\]]*\]", "").Trim();
+            }
+
+            if (Settings.Extras.Value == ExtrasPlace.OtherPage)
+            {
+                page.Entries.AddRange(ExtrasPage.Entries(terminal));
+            }
+
+            page.Subtitle = "Ship and crew commands";
+            MenuLook(terminal, page);
+
+            var monitor = page.Entries.FirstOrDefault(entry => entry.Label == "VIEW MONITOR");
+            if (monitor != null)
+            {
+                monitor.LiveCells = () => new[] { terminal.displayingPersistentImage != null ? "ON" : "OFF" };
+                monitor.Cells = monitor.LiveCells();
+            }
+
+            return page;
         }
 
-        // Everything that is not the game's own: the mods we know as a page each, what mods wrote onto the
-        // game's two menus, and under that the commands that work but that nothing on the terminal mentions.
-        // Commands of mods that have a page of ours, though they are written onto the game's menus.
         private static readonly HashSet<string> Handled = new HashSet<string> { "emotes" };
 
         private static MenuPage ModsPage(Terminal terminal, List<MenuEntry> advertised)
         {
-            // On top the mods this terminal knows and has pages for. Every other command of a mod goes under
-            // UNLISTED, with its name only: what it does is the mod's own business.
             var page = new MenuPage { Title = "MODS" };
+            var apps = new HashSet<string>(InteractiveTerminal.Commands().Select(Commands.Normalize));
             page.Entries.AddRange(KnownCommands.GroupEntries());
             page.Entries.AddRange(KnownCommands.SinglesAmong(InteractiveTerminal.Commands()));
 
@@ -674,8 +728,6 @@ namespace ClickableTerminal
                 page.Entries.Add(new MenuEntry { Label = added.Label.ToUpperInvariant(), Command = added.Command, Description = added.Description });
             }
 
-            // Every Interactive Terminal API application works with our cursor, so none of them is unknown here.
-            // The API has no line about what an application does: the ones we know have theirs above.
             var shown = new HashSet<string>(page.Entries.Select(entry => Commands.Normalize(entry.Command ?? entry.Prefill ?? "")));
             foreach (var command in InteractiveTerminal.Commands())
             {
@@ -726,17 +778,41 @@ namespace ClickableTerminal
 
             if (unlisted.Count > 0)
             {
-                // A folder of its own, last on the page.
                 var sorted = unlisted.OrderBy(entry => entry.Label, StringComparer.OrdinalIgnoreCase).ToList();
                 page.Entries.Add(new MenuEntry
                 {
                     Label = "UNLISTED",
-                    Description = "Commands of mods this terminal has no page for.",
-                    Open = () => new MenuPage { Title = "UNLISTED", Entries = sorted }
+                    Description = "Commands of mods this terminal has no page for. Clicking one runs it the way typing it would.",
+                    Open = () => Answers.InWindows(terminal, MenuLook(terminal, new MenuPage { Title = "UNLISTED", Subtitle = $"{sorted.Count} commands", Entries = sorted }))
                 });
             }
 
-            return page.Entries.Count > 0 ? page : null;
+            if (page.Entries.Count == 0)
+            {
+                return null;
+            }
+
+            page.Subtitle = "What the installed mods add to this terminal";
+            return Answers.InWindows(terminal, MenuLook(terminal, page));
+        }
+
+        internal static MenuPage MenuLook(Terminal terminal, MenuPage page)
+        {
+            page.Extra = () => StatusPanel.Build(terminal);
+
+            page.LivePanels = Settings.Extras.Value == ExtrasPlace.StatusPanel;
+            return page.Sized(0.8f, 0.7f, 0.9f);
+        }
+
+        private static bool IsShortAnswer(Terminal terminal, TerminalNode node)
+        {
+            var text = System.Text.RegularExpressions.Regex.Replace(node.displayText ?? "", "<[^>]*>", "").Trim();
+            var lines = text.Split('\n').Count(line => line.Trim().Length > 0);
+            return text.Length > 2 && text.Length < 200 && lines <= 3
+                   && !node.acceptAnything && (node.terminalOptions == null || node.terminalOptions.Length == 0)
+                   && node.buyItemIndex < 0 && node.buyVehicleIndex < 0 && node.shipUnlockableID < 0 && node.buyRerouteToMoon < 0
+                   && node.creatureFileID < 0 && node.storyLogFileID < 0 && node.displayPlanetInfo < 0
+                   && node != Special(terminal, HelpNode) && node != Special(terminal, WelcomeNode);
         }
 
         private static TerminalNode NodeOf(Terminal terminal, string word)

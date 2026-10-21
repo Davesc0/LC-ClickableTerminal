@@ -15,6 +15,7 @@ namespace ClickableTerminal
         private static readonly Regex LeadingNumber = new Regex(@"^\s*\d+\s*", RegexOptions.Compiled);
         private static readonly Regex Grade = new Regex(@"^(F|D|C|B|A|S+)([+\-]*)$", RegexOptions.Compiled);
         private static readonly PageState State = new PageState();
+        private static bool pickCompany;
 
         internal static MenuPage Build(Terminal terminal)
         {
@@ -30,6 +31,7 @@ namespace ClickableTerminal
             var wanted = State.FlagsWith(Tag).ToList();
             var simulate = HasKeyword(terminal, "simulate");
             var rows = new List<KeyValuePair<SelectableLevel, MenuEntry>>();
+            var levels = new Dictionary<MenuEntry, SelectableLevel>();
             var sellers = new List<SelectableLevel>();
             var moons = Moons(terminal, catalog, data);
 
@@ -37,10 +39,21 @@ namespace ClickableTerminal
             {
                 var route = catalog.Routes[level];
 
-                // A moon that buys scrap is not one to compare with the others: it goes up next to the Company.
                 if (Sells(level, data))
                 {
                     sellers.Add(level);
+                    continue;
+                }
+
+                if (Mysteries.Contains(level))
+                {
+                    if (!State.Has(Affordable) && !State.Has(ClearSky) && wanted.Count == 0)
+                    {
+                        var unknown = MysteryRow();
+                        levels[unknown] = level;
+                        rows.Add(new KeyValuePair<SelectableLevel, MenuEntry>(level, unknown));
+                    }
+
                     continue;
                 }
 
@@ -50,13 +63,14 @@ namespace ClickableTerminal
                     continue;
                 }
 
-                // Every ticked tag has to be on the moon.
                 if (wanted.Count > 0 && (!data.Tags.TryGetValue(level, out var tags) || !wanted.All(tags.Contains)))
                 {
                     continue;
                 }
 
-                rows.Add(new KeyValuePair<SelectableLevel, MenuEntry>(level, Row(terminal, catalog, data, level, route, NameOf(level), simulate)));
+                var row = Row(terminal, catalog, data, level, route, NameOf(level), simulate);
+                levels[row] = level;
+                rows.Add(new KeyValuePair<SelectableLevel, MenuEntry>(level, row));
             }
 
             if (moons.Count == 0)
@@ -69,7 +83,14 @@ namespace ClickableTerminal
             var page = new MenuPage
             {
                 Title = "MOONS",
-                Hint = simulate ? "Right: info  Wheel: simulate" : "Right click: info",
+                Subtitle = round.currentLevel != null ? "Orbiting " + NameOf(round.currentLevel) : null,
+
+                SelectRows = true,
+                Scale = 0.7f,
+                ScaleMin = 0.6f,
+                ScaleMax = 0.8f,
+                DetailFor = entry => !levels.TryGetValue(entry, out var level) ? null
+                    : Mysteries.Contains(level) ? MysteryDetail() : Detail(terminal, catalog, data, level, simulate),
                 SortBy = column =>
                 {
                     State.SortBy(column);
@@ -78,58 +99,75 @@ namespace ClickableTerminal
             };
 
             page.Columns.Add(new Column { Header = State.HeaderFor("NAME", 0) });
-            // Some moons write a whole sentence where the risk grade goes. That one column is kept in check,
-            // the weather always gets the room its longest name needs.
+            // Some moons write a whole sentence where the risk grade goes.
             page.Columns.Add(new Column { Header = State.HeaderFor("RISK", 1), Chars = 6, MaxChars = 9 });
             page.Columns.Add(new Column { Header = State.HeaderFor("WEATHER", 2), Chars = 9 });
             page.Columns.Add(new Column { Header = State.HeaderFor("PRICE", 3), Chars = 7, AlignRight = true });
 
-            page.Tools.Add(State.ToolFor("CAN AFFORD", Affordable, redraw));
-            page.Tools.Add(State.ToolFor("CLEAR SKY", ClearSky, redraw));
-
-            // Only when a mod has given the moons tags to filter by.
-            if (data.Tags.Count > 0)
+            var on = wanted.Count + (State.Has(Affordable) ? 1 : 0) + (State.Has(ClearSky) ? 1 : 0);
+            page.Corner = new ToolButton
             {
-                page.Tools.Add(new ToolButton
-                {
-                    Label = wanted.Count > 0 ? $"TAGS ({wanted.Count})" : "TAGS",
-                    Active = wanted.Count > 0,
-                    Click = () => Navigator.Open(() => TagsPage(terminal))
-                });
-            }
+                Label = on > 0 ? $"SETTINGS ({on})" : "SETTINGS",
+                Active = on > 0,
+                Click = () => SettingsWindow(terminal)
+            };
 
-            // The places that buy scrap sit above the table as buttons, under the one rate the game has for all of them.
             page.Summary = $"The Company is buying at {Mathf.RoundToInt(round.companyBuyingRate * 100f)}%";
 
-            foreach (var pair in catalog.Routes)
+            var company = catalog.Routes.FirstOrDefault(pair => IsCompany(pair.Key, pair.Value)).Key;
+            if (company != null)
             {
-                if (IsCompany(pair.Key, pair.Value))
-                {
-                    page.Pinned.Add(Buyer(terminal, catalog, data, pair.Key));
-                    break;
-                }
-            }
-
-            foreach (var level in sellers)
-            {
-                page.Pinned.Add(Buyer(terminal, catalog, data, level));
-            }
-
-            // With the Company as the only buyer the line about the rate is the button, as in the game's own list.
-            if (sellers.Count == 0 && page.Pinned.Count == 1)
-            {
-                page.Pinned[0].Label = page.Summary;
-                page.Pinned[0].Flat = true;
-                page.Summary = null;
+                sellers.Insert(0, company);
             }
 
             AddRows(page, rows, data);
+
+            if (sellers.Count > 0)
+            {
+                var top = new List<MenuEntry> { new MenuEntry { Label = "COMPANY MOONS", IsHeader = true } };
+                foreach (var level in sellers)
+                {
+                    var row = Row(terminal, catalog, data, level, catalog.Routes[level], NameOf(level), simulate);
+                    levels[row] = level;
+                    top.Add(row);
+                }
+
+                // The line about the rate is the Company's button, as in the game's own list: it picks the Company's row.
+                if (company != null)
+                {
+                    var companyRow = top[1];
+                    page.Pinned.Add(new MenuEntry
+                    {
+                        Label = page.Summary,
+                        Flat = true,
+                        Click = () =>
+                        {
+                            pickCompany = true;
+                            Navigator.Rebuild(terminal);
+                        }
+                    });
+                    page.Summary = null;
+                    if (pickCompany)
+                    {
+                        page.Pick = companyRow;
+                        pickCompany = false;
+                    }
+                }
+
+                top.Add(new MenuEntry { Label = "", IsHeader = true });
+                if (!page.Entries.Any(entry => entry.IsHeader && entry.Label.Length > 0))
+                {
+                    top.Add(new MenuEntry { Label = "MOONS", IsHeader = true });
+                }
+
+                page.Entries.InsertRange(0, top);
+            }
+
             return page;
         }
 
-        // One list, or a section per author when that is switched on and there is more than one author to tell apart.
-        // With TooManyMoons the day's draw is one section of its own, and the moons that mod keeps open next to it
-        // (a story pack's unlocked moons, say) follow under their authors, whatever the setting says.
+        // With TooManyMoons the day's draw is a section of its own, and the moons that mod keeps open beside it follow
+        // under their authors, whatever the setting says.
         private static void AddRows(MenuPage page, List<KeyValuePair<SelectableLevel, MenuEntry>> rows, MoonData data)
         {
             var apart = data.Rotating && rows.Any(row => data.Drawn.Contains(row.Key)) && rows.Any(row => !data.Drawn.Contains(row.Key));
@@ -159,20 +197,108 @@ namespace ClickableTerminal
             }
         }
 
-        private static MenuEntry Buyer(Terminal terminal, Catalog catalog, MoonData data, SelectableLevel level)
+        private static Detail Detail(Terminal terminal, Catalog catalog, MoonData data, SelectableLevel level, bool simulate)
         {
             var route = catalog.Routes[level];
-            var locked = data.Locked.Contains(level);
             var here = StartOfRound.Instance.currentLevel == level;
-
-            return new MenuEntry
+            var detail = new Detail
             {
-                Label = NameOf(level) + (route.Price > 0 ? $"  ${route.Price}" : ""),
-                Marker = here ? Marker.Here : locked ? Marker.Locked : Marker.None,
-                Command = route.Command,
-                AltCommand = catalog.InfoFor(route),
-                Dim = locked || (!here && route.Price > terminal.groupCredits)
+                Texture = MoonPicture.For(level),
+                Missing = level.videoReel == null ? "NO VIDEO" : null,
+                Title = NameOf(level),
             };
+
+            detail.Facts.Add(new Fact { Label = "Risk", Value = string.IsNullOrEmpty(level.riskLevel) ? "-" : level.riskLevel });
+            detail.Facts.Add(new Fact { Label = "Weather", Value = level.currentWeather == LevelWeatherType.None ? "Clear" : level.currentWeather.ToString() });
+            detail.Facts.Add(new Fact { Label = "Route cost", Value = here ? "You are here" : route.Price > 0 ? "$" + route.Price : "FREE" });
+
+            if (data.Locked.Contains(level))
+            {
+                detail.Facts.Add(new Fact { Label = "Status", Value = "Locked" });
+            }
+            else if (!here)
+            {
+                detail.Buttons.Add(new ToolButton
+                {
+                    Label = route.Price > 0 ? $"BUY ${route.Price}" : "ROUTE",
+                    Primary = true,
+                    Off = route.Price > terminal.groupCredits,
+                    Click = () => Route(terminal, level, route)
+                });
+            }
+
+            var info = catalog.InfoNode(route);
+            if (info != null)
+            {
+                detail.Buttons.Add(new ToolButton { Label = "INFO", Click = () => Window.ShowPage(terminal, NameOf(level).ToUpperInvariant(), info) });
+            }
+
+            if (HasForecast(level))
+            {
+                detail.Buttons.Add(new ToolButton { Label = "FORECAST", Click = () => WeatherForecast.ShowWindow(level) });
+            }
+
+            if (simulate)
+            {
+                var name = NameOf(level);
+                detail.Buttons.Add(new ToolButton
+                {
+                    Label = "SIMULATE",
+                    Click = () => Window.Show(new Window { Title = "SIMULATE: " + name.ToUpperInvariant(), Text = Simulation(Commands.Ask(terminal, "simulate " + name), name) })
+                });
+            }
+
+            return detail;
+        }
+
+        private static void Route(Terminal terminal, SelectableLevel level, Target route)
+        {
+            if (route.Price <= 0)
+            {
+                Fly(terminal, level, route);
+                return;
+            }
+
+            var name = NameOf(level);
+            var window = new Window
+            {
+                Title = "BUY " + name.ToUpperInvariant() + "?",
+                Text = $"Route to {name}<pos=65%>${route.Price}\nCredits after<pos=65%>${terminal.groupCredits - route.Price}"
+            };
+            window.Buttons.Add(new ToolButton { Label = "BUY", Click = () => Fly(terminal, level, route) });
+            window.Buttons.Add(new ToolButton { Label = "CANCEL", Click = Window.Close });
+            Window.Show(window);
+        }
+
+        internal static void Fly(Terminal terminal, SelectableLevel level, Target route)
+        {
+            if (route.Confirm == null)
+            {
+                Commands.Submit(terminal, route.Command);
+                return;
+            }
+
+            var answer = Commands.Act(terminal, route.Confirm, 1);
+            Navigator.Rebuild(terminal);
+            Window.Show(new Window { Title = "ROUTE: " + NameOf(level).ToUpperInvariant(), Text = answer });
+        }
+
+        private static readonly Regex Chance = new Regex(@"^\*?\s*(.+?)\s*//\s*Chance:\s*(\S+)", RegexOptions.Compiled);
+
+        // "* Name // Chance: 12.3%"
+        private static string Simulation(string printed, string name)
+        {
+            var lines = Window.Tidy(printed, name).Split('\n').Select(line =>
+            {
+                var match = Chance.Match(System.Text.RegularExpressions.Regex.Replace(line, "<[^>]*>", "").Trim());
+                return match.Success ? "  " + match.Groups[1].Value + "<pos=72%>" + match.Groups[2].Value : line;
+            });
+            return string.Join("\n", lines);
+        }
+
+        private static bool HasForecast(SelectableLevel level)
+        {
+            return WeatherForecast.Available && level.randomWeathers != null && level.randomWeathers.Length > 0;
         }
 
         private static bool IsCompany(SelectableLevel level, Target route)
@@ -180,35 +306,42 @@ namespace ClickableTerminal
             return route.Noun == "company" || level.sceneName == "CompanyBuilding";
         }
 
-        // Named in the config. The game has no flag for it: "no enemies and no scrap" is set on moons that are
-        // nothing like the Company (Oldred has both in play, End is a story moon).
+        // The game has no flag for it, and "no enemies and no scrap" is also set on moons like Oldred and End.
         private static bool Sells(SelectableLevel level, MoonData data)
         {
             var name = Commands.Normalize(NameOf(level));
             return Settings.SellingMoons.Value.Split(',').Any(entry => Commands.Normalize(entry) == name);
         }
 
-        // The moons this page may show at all, before the player's own filters: the catalogue in its own order,
-        // then whatever else has a route, as far as the settings for hidden and locked moons let them through.
         private static List<SelectableLevel> Moons(Terminal terminal, Catalog catalog, MoonData data)
         {
             var listed = terminal.moonsCatalogueList;
             var catalogued = new HashSet<SelectableLevel>(listed.Where(level => level != null));
             var seen = new HashSet<SelectableLevel>();
+            Mysteries.Clear();
             var moons = new List<SelectableLevel>();
 
             foreach (var level in listed.Concat(StartOfRound.Instance.levels ?? new SelectableLevel[0]))
             {
-                // Only moons that can really be typed in. The Company is not one of them.
                 if (level == null || !catalog.Routes.TryGetValue(level, out var route) || IsCompany(level, route) || !seen.Add(level))
                 {
                     continue;
                 }
 
                 var hidden = data.Hidden.Contains(level) || (!data.LevelLoader && !catalogued.Contains(level));
-                if ((hidden && !Reveal(level)) || (data.Locked.Contains(level) && !Settings.ShowLockedMoons.Value))
+                if (data.Locked.Contains(level) && !Settings.ShowLockedMoons.Value)
                 {
                     continue;
+                }
+
+                if (hidden && !Reveal(level))
+                {
+                    if (Settings.ShowHiddenMoons.Value != ShowHidden.Mystery)
+                    {
+                        continue;
+                    }
+
+                    Mysteries.Add(level);
                 }
 
                 moons.Add(level);
@@ -217,35 +350,55 @@ namespace ClickableTerminal
             return moons;
         }
 
-        // The command for one of the moons that can be flown to right now: not locked, not too expensive, not this one.
-        internal static string RandomRoute(Terminal terminal)
+        internal static void RandomWindow(Terminal terminal)
         {
             var round = StartOfRound.Instance;
             if (terminal.moonsCatalogueList == null || round == null)
             {
-                return null;
+                return;
             }
 
             var catalog = Catalog.Read(terminal);
             var data = MoonData.Read();
             var open = Moons(terminal, catalog, data)
-                .Where(level => level != round.currentLevel && !data.Locked.Contains(level) && catalog.Routes[level].Price <= terminal.groupCredits)
+                .Where(level => level != round.currentLevel && !data.Locked.Contains(level) && !Sells(level, data) && !Mysteries.Contains(level)
+                                && catalog.Routes[level].Price <= terminal.groupCredits)
                 .ToList();
 
-            return open.Count > 0 ? catalog.Routes[open[UnityEngine.Random.Range(0, open.Count)]].Command : null;
+            if (open.Count == 0)
+            {
+                Window.Show(new Window { Title = "RANDOM MOON", Text = "There is no other moon the crew can fly to right now." });
+                return;
+            }
+
+            var level = open[UnityEngine.Random.Range(0, open.Count)];
+            var route = catalog.Routes[level];
+            var name = NameOf(level);
+            var window = new Window
+            {
+                Title = "RANDOM MOON: " + name.ToUpperInvariant(),
+                Texture = MoonPicture.For(level),
+                NoPicture = level.videoReel == null,
+                Side = "<alpha=#99>RISK<alpha=#FF><pos=50%>" + (string.IsNullOrEmpty(level.riskLevel) ? "-" : level.riskLevel)
+                       + "\n<alpha=#99>WEATHER<alpha=#FF><pos=50%>" + (level.currentWeather == LevelWeatherType.None ? "Clear" : level.currentWeather.ToString())
+                       + "\n<alpha=#99>ROUTE COST<alpha=#FF><pos=50%>" + (route.Price > 0 ? "$" + route.Price : "FREE")
+                       + (route.Price > 0 ? "\n<alpha=#99>CREDITS AFTER<alpha=#FF><pos=50%>$" + (terminal.groupCredits - route.Price) : "")
+            };
+            window.Buttons.Add(new ToolButton { Label = route.Price > 0 ? $"GO (${route.Price})" : "GO", Click = () => Fly(terminal, level, route) });
+            window.Buttons.Add(new ToolButton { Label = "ANOTHER", Off = open.Count < 2, Click = () => RandomWindow(terminal) });
+            window.Buttons.Add(new ToolButton { Label = "CANCEL", Click = Window.Close });
+            Window.Show(window);
         }
 
-        // Every tag the moons on the page carry, each one a tick box with how many moons have it.
-        private static MenuPage TagsPage(Terminal terminal)
+        // A moon has to carry every tag that is on.
+        private static void SettingsWindow(Terminal terminal)
         {
-            var page = new MenuPage { Title = "MOON TAGS", Hint = "BACK shows the moons" };
             var counts = new SortedDictionary<string, int>();
             var data = MoonData.Read();
 
             foreach (var level in Moons(terminal, Catalog.Read(terminal), data))
             {
-                // The buyers are not in the table, so they are not counted either.
-                if (!Sells(level, data) && data.Tags.TryGetValue(level, out var tags))
+                if (!Sells(level, data) && !Mysteries.Contains(level) && data.Tags.TryGetValue(level, out var tags))
                 {
                     foreach (var tag in tags)
                     {
@@ -255,35 +408,47 @@ namespace ClickableTerminal
                 }
             }
 
-            if (State.FlagsWith(Tag).Any())
+            Action again = () =>
             {
-                page.Entries.Add(new MenuEntry
-                {
-                    Label = "Clear all",
-                    Click = () =>
-                    {
-                        State.ClearFlags(Tag);
-                        Navigator.Rebuild(terminal);
-                    }
-                });
-                page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
-            }
+                Navigator.Rebuild(terminal);
+                SettingsWindow(terminal);
+            };
 
+            var window = new Window { Title = "MOON SETTINGS" };
+            var filters = window.Group("FILTERS");
+            filters.Add(State.ToolFor("CAN AFFORD", Affordable, again));
+            filters.Add(State.ToolFor("CLEAR SKY", ClearSky, again));
+
+            var tagged = counts.Count > 0 ? window.Group("TAGS: only moons with every tag that is on") : new List<ToolButton>();
             foreach (var pair in counts)
             {
                 var flag = Tag + pair.Key;
-                page.Entries.Add(new MenuEntry
+                tagged.Add(new ToolButton
                 {
-                    Label = $"{(State.Has(flag) ? "[x]" : "[ ]")} {pair.Key}  ({pair.Value})",
+                    Label = $"{pair.Key} ({pair.Value})",
+                    Active = State.Has(flag),
                     Click = () =>
                     {
                         State.Toggle(flag);
-                        Navigator.Rebuild(terminal);
+                        again();
                     }
                 });
             }
 
-            return page;
+            if (State.FlagsWith(Tag).Any())
+            {
+                tagged.Add(new ToolButton
+                {
+                    Label = "CLEAR TAGS",
+                    Click = () =>
+                    {
+                        State.ClearFlags(Tag);
+                        again();
+                    }
+                });
+            }
+
+            Window.Show(window);
         }
 
         private static MenuEntry Row(Terminal terminal, Catalog catalog, MoonData data, SelectableLevel level, Target route, string name, bool simulate)
@@ -293,21 +458,14 @@ namespace ClickableTerminal
             var weather = level.currentWeather == LevelWeatherType.None ? "" : level.currentWeather.ToString();
             var risk = string.IsNullOrEmpty(level.riskLevel) ? "-" : level.riskLevel;
 
-            // With WeatherRegistry the weather opens its forecast, also where the sky is clear and the cell is empty
-            // (a space: an empty cell is not a button).
-            var forecast = WeatherForecast.Available && level.randomWeathers != null && level.randomWeathers.Length > 0;
-            var shown = forecast && weather.Length == 0 ? " " : weather;
-
             return new MenuEntry
             {
-                CellClicks = forecast ? new System.Action[] { null, () => Navigator.Open(() => WeatherForecast.Page(terminal, level)), null } : null,
                 Label = name,
                 Marker = here ? Marker.Here : locked ? Marker.Locked : Marker.None,
                 Command = route.Command,
-                AltCommand = catalog.InfoFor(route),
-                WheelCommand = simulate ? "simulate " + name : null,
+                AltClick = catalog.InfoNode(route) != null ? () => Window.ShowPage(terminal, name.ToUpperInvariant(), catalog.InfoNode(route)) : (System.Action)null,
                 Dim = locked || (!here && route.Price > terminal.groupCredits),
-                Cells = new[] { risk, shown, "$" + route.Price },
+                Cells = new[] { risk, weather, "$" + route.Price },
                 Keys = new IComparable[] { name, RiskRank(level.riskLevel), weather, route.Price }
             };
         }
@@ -318,13 +476,38 @@ namespace ClickableTerminal
             {
                 case ShowHidden.Always:
                     return true;
-                case ShowHidden.AfterDiscovery:
+                case ShowHidden.AfterOrbit:
+                case ShowHidden.Mystery:
                     return MoonMemory.HasFlownTo(level);
-                case ShowHidden.AfterVisited:
-                    return MoonMemory.HasLandedOn(level);
                 default:
                     return false;
             }
+        }
+
+        // Mystery: a hidden moon nobody has flown to shows as ??? and cannot be clicked. Its name has to be typed, as
+        // without this mod.
+        private static readonly HashSet<SelectableLevel> Mysteries = new HashSet<SelectableLevel>();
+
+        private static MenuEntry MysteryRow()
+        {
+            return new MenuEntry
+            {
+                Label = "???",
+                Dim = true,
+                Click = () => { },
+                Cells = new[] { "?", "?", "?" },
+                Keys = new IComparable[] { "\uffff", int.MaxValue, "\uffff", int.MaxValue }
+            };
+        }
+
+        private static Detail MysteryDetail()
+        {
+            return new Detail
+            {
+                Title = "???",
+                Missing = "NO SIGNAL",
+                Text = "A moon the autopilot does not list. Find out its name and fly there once, and it shows here like the others."
+            };
         }
 
         private static bool HasKeyword(Terminal terminal, string word)
@@ -341,8 +524,8 @@ namespace ClickableTerminal
             return stripped.Length > 0 ? stripped : name;
         }
 
-        // "Safe" first, then F up to S. Every + or - moves it a step, so S < S+ < S++ < S++++,
-        // and modded grades like SS or SSS+ come after all of those. Anything unreadable sorts last.
+        // "Safe" first, then F up to S. Every + or - is a step, so S < S+ < S++, and modded grades like SS come after.
+        // Anything unreadable sorts last.
         private static int RiskRank(string risk)
         {
             var grade = (risk ?? "").Trim().ToUpperInvariant();

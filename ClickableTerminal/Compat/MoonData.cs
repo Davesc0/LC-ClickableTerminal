@@ -5,23 +5,19 @@ using HarmonyLib;
 
 namespace ClickableTerminal
 {
-    // What LethalLevelLoader and DawnLib know about the moons: their tags, and which routes are hidden or locked.
-    // Read by reflection, so neither mod has to be installed.
+    // Read by reflection, so neither LethalLevelLoader nor DawnLib has to be installed.
     internal class MoonData
     {
         internal readonly Dictionary<SelectableLevel, HashSet<string>> Tags = new Dictionary<SelectableLevel, HashSet<string>>();
         internal readonly HashSet<SelectableLevel> Hidden = new HashSet<SelectableLevel>();
         internal readonly HashSet<SelectableLevel> Locked = new HashSet<SelectableLevel>();
 
-        // Who made each moon. The game's own are under Vanilla.
         internal const string Vanilla = "VANILLA";
         internal readonly Dictionary<SelectableLevel, string> Authors = new Dictionary<SelectableLevel, string>();
 
-        // With LethalLevelLoader every moon is in the game's catalogue list, and its own flag says which are hidden.
         internal bool LevelLoader;
 
-        // With TooManyMoons only a few moons are open at a time. Drawn holds today's draw; a moon that is
-        // open without being drawn is one that mod keeps open next to it.
+        // TooManyMoons: Drawn is today's draw. A moon open without being drawn is one that mod keeps open next to it.
         internal const string Rotation = "ROTATION";
         internal bool Rotating;
         internal readonly HashSet<SelectableLevel> Drawn = new HashSet<SelectableLevel>();
@@ -29,8 +25,7 @@ namespace ClickableTerminal
         private static MoonData last;
         private static float lastAt = -100f;
 
-        // A page asks for this every time it is drawn again (a sort, a filter, a tick). What the mods say about
-        // the moons does not change from one click to the next, so it is read at most once in a few seconds.
+        // Asked on every redraw, but this does not change between clicks, so it is read at most once every few seconds.
         internal static MoonData Read()
         {
             var now = UnityEngine.Time.realtimeSinceStartup;
@@ -76,7 +71,6 @@ namespace ClickableTerminal
                     Locked.Add(level);
                 }
 
-                // Grouped by creator, so two moon packs of one creator end up together.
                 var custom = Traverse.Create(extended).Property("ContentType").GetValue()?.ToString() != "Vanilla";
                 Authors[level] = custom ? Origins.OfExtended(extended, teams) ?? Vanilla : Vanilla;
 
@@ -109,7 +103,7 @@ namespace ClickableTerminal
                     continue;
                 }
 
-                // Without LethalLevelLoader the namespace of the moon's key is the closest thing to an author.
+                // Without LethalLevelLoader the namespace of the key is the closest thing to an author.
                 if (!Authors.ContainsKey(level))
                 {
                     var space = Traverse.Create(moon).Property("Key").Property("Namespace").GetValue() as string;
@@ -154,7 +148,7 @@ namespace ClickableTerminal
             }
         }
 
-        // The two mods spell the same tag differently ("Free" and "free"), so they are folded together.
+        // The two mods spell the same tag differently ("Free" and "free").
         private void Add(SelectableLevel level, string tag)
         {
             if (string.IsNullOrWhiteSpace(tag))

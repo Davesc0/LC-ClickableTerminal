@@ -10,8 +10,7 @@ using UnityEngine.TextCore;
 
 namespace ClickableTerminal
 {
-    // Controller button pictures from InputUtils, when it is installed. CorrectControllerIcon, if present,
-    // makes InputUtils hand out the pictures of the controller picked there. Without InputUtils: none, the names are written.
+    // CorrectControllerIcon, if present, makes InputUtils hand out the pictures of the controller picked there.
     internal static class PadIcons
     {
         internal const int South = 0;
@@ -34,7 +33,6 @@ namespace ClickableTerminal
             return Sprites[button];
         }
 
-        // The pictures as a sprite asset, so a text can show them between its words. Null when there are none.
         internal static TMP_SpriteAsset Sheet
         {
             get
@@ -44,7 +42,6 @@ namespace ClickableTerminal
             }
         }
 
-        // The picture in a text, coloured like the letters around it. Null when there is no picture for the button.
         internal static string Markup(int button)
         {
             return Sheet != null && Sprites[button] != null ? $"<sprite name=\"pad{button}\" tint=1>" : null;
@@ -70,7 +67,7 @@ namespace ClickableTerminal
             }
         }
 
-        // Kept in its own method so InputUtils is only loaded when it is there.
+        // A method of its own, so InputUtils is only loaded when it is there.
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void FromInputUtils()
         {

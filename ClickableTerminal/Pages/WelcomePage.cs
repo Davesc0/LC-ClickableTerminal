@@ -2,8 +2,7 @@ using System;
 
 namespace ClickableTerminal
 {
-    // The greeting of a new session. Written out here instead of taken from the game's page,
-    // so whatever other mods append to that page does not come along.
+    // Written out here, so whatever other mods append to the game's page does not come along.
     internal static class WelcomePage
     {
         internal static MenuPage Build()

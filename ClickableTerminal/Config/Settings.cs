@@ -3,26 +3,46 @@ using BepInEx.Configuration;
 
 namespace ClickableTerminal
 {
+    internal enum MonsterDetail
+    {
+        Off,
+        Count,
+        Kinds,
+        Places
+    }
+
+    internal enum ExtrasPlace
+    {
+        Off,
+        OwnPage,
+        OtherPage,
+        StatusPanel
+    }
+
     internal enum ShowHidden
     {
         Never,
-        AfterDiscovery,
-        AfterVisited,
+        AfterOrbit,
+        Mystery,
         Always
     }
 
     internal static class Settings
     {
+        internal static ConfigEntry<bool> OwnPages;
+        internal static ConfigEntry<bool> AppsInWindow;
         internal static ConfigEntry<bool> SkipWelcome;
         internal static ConfigEntry<bool> SharpTerminal;
         internal static ConfigEntry<bool> ZoomToScreen;
         internal static ConfigEntry<float> CursorSpeed;
         internal static ConfigEntry<bool> LineScroll;
         internal static ConfigEntry<int> ScrollLines;
-        internal static ConfigEntry<bool> ShowExtras;
+        internal static ConfigEntry<ExtrasPlace> Extras;
+        internal static ConfigEntry<MonsterDetail> Monsters;
         internal static ConfigEntry<bool> RememberLastPage;
         internal static ConfigEntry<bool> ScreenAlwaysOn;
         internal static ConfigEntry<float> TextScale;
+        internal static ConfigEntry<bool> DebugLog;
 
         internal static ConfigEntry<ShowHidden> ShowHiddenMoons;
         internal static ConfigEntry<bool> ShowLockedMoons;
@@ -31,9 +51,7 @@ namespace ClickableTerminal
 
         internal static ConfigEntry<bool> ManageDecorations;
         internal static ConfigEntry<int> DecorationsOnOffer;
-        internal static ConfigEntry<bool> StoreCategoriesFirst;
         internal static ConfigEntry<bool> CategorizeItems;
-        internal static ConfigEntry<bool> ShowUtilitySlotIcon;
         internal static readonly ConfigEntry<string>[] CategoryName = new ConfigEntry<string>[ItemCategories.Slots];
         internal static readonly ConfigEntry<string>[] CategoryItems = new ConfigEntry<string>[ItemCategories.Slots];
         internal static readonly ConfigEntry<string>[] CategoryKeywords = new ConfigEntry<string>[ItemCategories.Slots];
@@ -43,7 +61,7 @@ namespace ClickableTerminal
         internal static ConfigEntry<bool> GroupCreaturesByAuthor;
         internal static ConfigEntry<string> ExtraCommands;
 
-        // The config file lists sections by name, so they are numbered to keep the general ones on top.
+        // The config file sorts sections by name.
         private const string General = "1. General";
         private const string Moons = "2. Moons";
         private const string Store = "3. Store";
@@ -53,6 +71,13 @@ namespace ClickableTerminal
 
         internal static void Init(ConfigFile config)
         {
+            OwnPages = config.Bind(General, "OwnPages", true,
+                "Draw the terminal's pages as menus (moons, store, bestiary and the rest). " +
+                "Off: the game's own text pages, with the mouse, the controller and the BACK and MENU buttons still working on them.");
+            AppsInWindow = config.Bind(General, "AppsInWindow", true,
+                "Show the screens of mods made with the Interactive Terminal API (Lategame Upgrades and others) in a window " +
+                "over the page they were opened from, with the mouse and the controller working on them. " +
+                "Off: they take the whole screen, as they draw themselves.");
             SkipWelcome = config.Bind(General, "SkipWelcome", false,
                 "Skip the welcome screen and open the main menu right away.");
             SharpTerminal = config.Bind(General, "SharpTerminal", true,
@@ -68,35 +93,44 @@ namespace ClickableTerminal
                 "Open the terminal on the page you left it on, instead of the main menu. Questions are not reopened.");
             ScreenAlwaysOn = config.Bind(General, "ScreenAlwaysOn", false,
                 "Keep the terminal's screen and light on when nobody is using it, showing the last page. Only on your side.");
-            ShowExtras = config.Bind(General, "ShowExtras", true,
-                "Add EXTRAS to the main menu: the ship's doors, teleporters, lights and lever, a random moon.");
+            Extras = config.Bind(General, "Extras", ExtrasPlace.OwnPage,
+                "The ship's doors, teleporters, lights and lever, and a random moon, pressed from the terminal. " +
+                "OwnPage: as EXTRAS on the main menu. OtherPage: at the end of OTHER. " +
+                "StatusPanel: as buttons at the bottom of the STATUS panel beside the main menu, OTHER and MODS. Off: nowhere.");
+            Monsters = config.Bind(General, "Monsters", MonsterDetail.Kinds,
+                "How much the MONSTERS button among the extras tells about what is alive on the moon.\n" +
+                "  Off     no such button\n" +
+                "  Count   only how many there are\n" +
+                "  Kinds   what they are, and how many of each\n" +
+                "  Places  also how many of each are inside the building and outside");
             LineScroll = config.Bind(General, "LineScroll", true,
                 "On the pages the game prints as text, scroll a few lines at a time instead of a third of the page. " +
                 "Stands aside when Terminal Scroll Patch is installed.");
             ScrollLines = config.Bind(General, "ScrollLines", 8, new ConfigDescription(
                 "How many lines one turn of the mouse wheel scrolls with LineScroll.", new AcceptableValueRange<int>(1, 30)));
             TextScale = config.Bind(General, "TextScale", 1f, new ConfigDescription(
-                "Size of the text on the list pages. 1 is the terminal's own letter size, smaller fits more rows on the screen.",
+                "Size of the text on the pages that have no size of their own (moons, store, bestiary, storage and the main menu do). " +
+                "1 is the terminal's own letter size, smaller fits more rows on the screen. The - and + buttons change it per page until the game is closed.",
                 new AcceptableValueRange<float>(0.6f, 1f)));
+
+            DebugLog = config.Bind(General, "DebugLog", false,
+                "Write to the log which pages the terminal loads and what it shows. Turn it on when you report a bug.");
 
             ShowHiddenMoons = config.Bind(Moons, "ShowHiddenMoons", ShowHidden.Never,
                 "When to list the moons that are kept off the catalogue, like Embrion and Artifice, or the ones a mod has hidden.\n" +
-                "  Never           they stay secret, you have to know the name\n" +
-                "  AfterDiscovery  once this save has flown there\n" +
-                "  AfterVisited    once this save has landed there\n" +
-                "  Always          listed from the start");
+                "  Never       they stay secret, you have to know the name\n" +
+                "  AfterOrbit  listed once this save has flown there\n" +
+                "  Mystery     listed as ??? until this save has flown there, then by name\n" +
+                "  Always      listed from the start");
             ShowLockedMoons = config.Bind(Moons, "ShowLockedMoons", true,
                 "List the moons a mod has locked: they are known, but nobody can fly there yet. They get a padlock after the name.");
             GroupMoonsByAuthor = config.Bind(Moons, "GroupMoonsByAuthor", false,
                 "Split the moon list into sections by who made the moons: the game's own first, then one section per author. " +
                 "Several moon mods by the same author share a section. Needs LethalLevelLoader or DawnLib to know who made what.");
-            SellingMoons = config.Bind(Moons, "SellingMoons", "Galetry, Shutter, Oxyde",
-                "Moons that buy scrap like the Company does, comma separated. They are listed next to the Company above the table. " +
+            SellingMoons = config.Bind(Moons, "SellingMoons", "Galetry, Shutter, Oxyde, Cordillera",
+                "Moons that buy scrap like the Company does, comma separated. They are listed with the Company under COMPANY MOONS at the top of the moon list. " +
                 "A name that no installed moon has is simply skipped.");
 
-            StoreCategoriesFirst = config.Bind(Store, "StoreCategoriesFirst", true,
-                "Open the store on a short list of its parts (items, vehicles, upgrades, decorations, suits), each with a page of its own, " +
-                "and a cart to order several items together. Off: everything on one long page, bought one at a time.");
             ManageDecorations = config.Bind(Store, "ManageDecorations", true,
                 "Let this mod set how many decorations and suits are on sale (DecorationsOnOffer). " +
                 "Off: the selection is left to the game or to another mod. Always off while StoreRotationConfig is installed.");
@@ -106,16 +140,11 @@ namespace ClickableTerminal
                 "so everyone in the lobby should have the same number. It takes effect the next time the store's selection changes.",
                 new AcceptableValueRange<int>(-1, 40)));
             HiddenStoreCategories = config.Bind(Store, "HiddenStoreCategories", "",
-                "Parts of the store that are not listed, comma separated. The CATEGORIES button in the store ticks them on and off, " +
-                "this is where it remembers them. Example: DECORATIONS, SUITS");
+                "Parts of the store that are not listed, comma separated. Example: DECORATIONS, SUITS");
 
             CategorizeItems = config.Bind(Store, "CategorizeItems", true,
                 "Sort the items into categories (LIGHTING, MELEE, FIREARMS...). Off: one ITEMS section with everything in it.");
 
-            ShowUtilitySlotIcon = config.Bind(Store, "ShowUtilitySlotIcon", true,
-                "Draw a small bag after the items that fit the utility slot.");
-
-            // The categories are listed in the store in this order. What fits none of them goes to OTHER.
             for (var slot = 0; slot < ItemCategories.Slots; slot++)
             {
                 var number = "Category " + (slot + 1);

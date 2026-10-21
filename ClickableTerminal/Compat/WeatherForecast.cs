@@ -9,8 +9,6 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // WeatherRegistry's forecast: what tomorrow's weather on a moon can be, and how likely each one is.
-    // Worked out from its own weights the way its "weather forecast" command does, and drawn as a page.
     internal static class WeatherForecast
     {
         internal const string Guid = "mrov.WeatherRegistry";
@@ -28,7 +26,6 @@ namespace ClickableTerminal
             internal bool Possible;
         }
 
-        // The answer to a typed "weather forecast", drawn as our page instead.
         internal static bool Claim(Terminal terminal, View view, string printed)
         {
             if (!Available)
@@ -81,7 +78,6 @@ namespace ClickableTerminal
                 page.Entries.Add(new MenuEntry { Label = chance.Name, Cells = new[] { chance.Percent.ToString("0.0") + "%" } });
             }
 
-            // Weathers with a weight that this moon never gets.
             var never = chances.Where(each => !each.Possible).Select(each => each.Name).ToList();
             if (never.Count > 0)
             {
@@ -91,6 +87,39 @@ namespace ClickableTerminal
 
             ResultPages.AddBack(page, terminal, null);
             return page;
+        }
+
+        internal static void ShowWindow(SelectableLevel level)
+        {
+            var window = new Window { Title = "FORECAST: " + MoonsPage.NameOf(level).ToUpperInvariant() };
+
+            if (!Read(level, out var now, out var chances))
+            {
+                window.Text = "WeatherRegistry did not give a forecast.";
+                Window.Show(window);
+                return;
+            }
+
+            string Named(string weather) => weather == "None" ? "Clear" : weather;
+
+            var text = new System.Text.StringBuilder();
+            text.Append("<alpha=#99>WEATHER NOW<alpha=#FF><pos=55%>").Append(Named(now)).Append("\n\n");
+            text.Append("<alpha=#99>TOMORROW<alpha=#FF>\n");
+            foreach (var chance in chances.Where(each => each.Possible && each.Percent > 0f))
+            {
+                // Same width digits, so the numbers line up.
+                text.Append(Named(chance.Name)).Append("<pos=55%><mspace=0.6em>")
+                    .Append(chance.Percent.ToString("0.0").PadLeft(5)).Append("</mspace>%\n");
+            }
+
+            var never = chances.Where(each => !each.Possible).Select(each => Named(each.Name)).ToList();
+            if (never.Count > 0)
+            {
+                text.Append("\n<alpha=#99>NEVER HERE<alpha=#BB>\n").Append(string.Join(", ", never));
+            }
+
+            window.Text = text.ToString();
+            Window.Show(window);
         }
 
         private static bool Read(SelectableLevel level, out string now, out List<Chance> chances)
@@ -138,7 +167,7 @@ namespace ClickableTerminal
                     var fromLevel = all.Contains(byLevel) ? (int)all[byLevel] : 0;
                     total += fromDefault + fromWeather + fromLevel;
 
-                    // The same pick as WeatherRegistry's own forecast: the moon's own weight, then weather to weather, then the default.
+                    // The same pick as WeatherRegistry: the moon's weight, then weather to weather, then the default.
                     picked.Add((weather, fromLevel != 0 ? fromLevel : fromWeather != 0 ? fromWeather : fromDefault));
                 }
 

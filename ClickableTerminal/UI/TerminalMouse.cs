@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -7,20 +8,16 @@ using UnityEngine.UI;
 
 namespace ClickableTerminal
 {
-    // Sits on the terminal. Moves a cursor over its screen and turns clicks into typed commands.
-    // Shows either one of our own menu pages or the game's text with its words made clickable.
     internal class TerminalMouse : MonoBehaviour
     {
         private const float HideAfter = 5f;
 
         internal static bool InUse;
 
-        // The wheel already does something of ours this frame: our page is on screen, or an application's counter or page.
         internal static bool WheelTaken;
 
         private static TerminalMouse active;
 
-        // How far the scrollbar moves for one line of the text on screen, 0 when it all fits.
         internal static float LineStep()
         {
             var self = active;
@@ -37,14 +34,12 @@ namespace ClickableTerminal
             return hidden > 1f ? line / hidden : 0f;
         }
 
-        // What the click, the right click and the wheel click are called on the controller in use. Null with a mouse.
         internal static string[] PadNames;
 
         private static readonly string[] Xbox = { "A", "X", "Y" };
         private static readonly string[] PlayStation = { "Cross", "Square", "Triangle" };
         private static readonly string[] Nintendo = { "B", "Y", "X" };
 
-        // With a controller the mouse's words become the buttons: InputUtils' pictures when it is installed, names otherwise.
         internal static string Words(string hint)
         {
             var names = PadNames;
@@ -68,7 +63,6 @@ namespace ClickableTerminal
                 : Xbox;
         }
 
-        // The button that does BACK or MENU, in front of the word, while a controller is in use.
         private void ShowPadIcon(HotSpot button, int pad, string word, Color color)
         {
             var label = button.Space.GetComponentInChildren<TextMeshProUGUI>(true);
@@ -103,15 +97,20 @@ namespace ClickableTerminal
             }
         }
 
+        internal const float HeaderScale = 0.75f;
+
         private Terminal terminal;
         private RectTransform frame;
         private RectTransform cursor;
         private RawImage cursorImage;
         private RectTransform hover;
         private Image hoverImage;
+        private RectTransform hoverFrame;
+        private HotSpot lastHit;
         private CanvasGroup gameText;
         private TextMeshProUGUI continueLabel;
         private MenuView menu;
+        private readonly Dictionary<float, MenuView> views = new Dictionary<float, MenuView>();
         private readonly InteractiveMouse apps = new InteractiveMouse();
 
         private readonly HotSpot backButton = new HotSpot();
@@ -122,6 +121,8 @@ namespace ClickableTerminal
         private int refocusIn;
         private float lastMoved = -100f;
         private bool pageShown;
+        private bool appWindow;
+        private string lastShown;
         private float zoom;
         private float lastScrolled;
         private float heldScroll;
@@ -129,9 +130,11 @@ namespace ClickableTerminal
         private RenderTexture sharp;
         private static readonly Vector3[] Corners = new Vector3[4];
         private readonly List<Vector2> targets = new List<Vector2>();
+        private readonly List<int> zones = new List<int>();
+        private readonly Dictionary<int, Vector2> lastIn = new Dictionary<int, Vector2>();
         private Vector2 heldStep;
         private float stepAt;
-        private readonly float[] padPressed = new float[5];
+        private readonly float[] padPressed = new float[9];
 
         private void Awake()
         {
@@ -145,7 +148,23 @@ namespace ClickableTerminal
             InUse = false;
         }
 
+        // A page that cannot be drawn falls back to the game's own text instead of breaking the terminal every frame.
         private void Update()
+        {
+            try
+            {
+                Frame();
+            }
+            catch (System.Exception e)
+            {
+                failedPage = Navigator.Current != null ? Navigator.Current.Page : null;
+                Plugin.WarnOnce($"The terminal page could not be drawn, the game's own text is shown instead: {e}");
+            }
+        }
+
+        private MenuPage failedPage;
+
+        private void Frame()
         {
             var player = GameNetworkManager.Instance != null ? GameNetworkManager.Instance.localPlayerController : null;
             var mouse = Mouse.current;
@@ -180,18 +199,47 @@ namespace ClickableTerminal
                 zoom = 0f;
             }
 
-            // A screen drawn with the Interactive Terminal API gets the mouse on top of its own keys.
             // Any other mod that has taken the input away is left alone.
             var app = InteractiveTerminal.Running();
             var foreign = !app && !field.interactable;
             var view = Navigator.Current;
-            var page = !foreign && !app && view != null ? view.Page : null;
 
-            if (app)
+            appWindow = app && Settings.AppsInWindow.Value && Settings.OwnPages.Value && view != null && view.Page != null;
+            var page = !foreign && (!app || appWindow) && view != null && Settings.OwnPages.Value ? view.Page : null;
+            if (page != null && page == failedPage)
             {
-                apps.Tick(field, text);
+                page = null;
+            }
 
-                // Another of its screens starts at its top, not where the last one was scrolled to.
+            var shownNow = $"{(node != null ? node.name : "-")} -> {(page != null ? page.Title : "game text")}{(foreign ? " (another mod has the input)" : "")}{(app ? " (application)" : "")}";
+            if (shownNow != lastShown)
+            {
+                lastShown = shownNow;
+                Plugin.Debug("Screen: " + shownNow);
+            }
+
+            if (appWindow && (Window.Open == null || !Window.Open.App))
+            {
+                Window.Show(new Window
+                {
+                    Title = (Navigator.LastApplication ?? "APPLICATION").ToUpperInvariant(),
+                    App = true,
+                    Closing = () => InteractiveTerminal.Exit(InteractiveTerminal.Application())
+                });
+            }
+            else if (!app && Window.Open != null && Window.Open.App)
+            {
+                Window.Drop();
+            }
+
+            if (app && appWindow && menu.WindowText != null)
+            {
+                apps.Tick(menu.AppScreen(), menu.WindowText);
+            }
+            else if (app && !appWindow)
+            {
+                apps.Tick(field.text, text);
+
                 if (apps.TakeScreenChange() && terminal.scrollBarVertical != null)
                 {
                     terminal.scrollBarVertical.value = 1f;
@@ -203,14 +251,21 @@ namespace ClickableTerminal
                 apps.Reset();
             }
 
-            if (menu.Scale != Mathf.Clamp(Settings.TextScale.Value, 0.6f, 1f))
+            var scale = page != null ? PageScale.For(page) : menu.Scale;
+            if (!views.TryGetValue(scale, out var wanted))
             {
-                menu.Dispose();
-                menu = new MenuView(terminal, frame, text);
+                views[scale] = wanted = new MenuView(terminal, frame, text, scale);
+            }
+
+            if (wanted != menu)
+            {
+                menu.Show(null);
+                menu = wanted;
             }
 
             pageShown = page != null;
             gameText.alpha = pageShown ? 0f : 1f;
+            KeepTextClear(text, !pageShown && !foreign);
             menu.Show(page);
 
             if (pageShown)
@@ -218,12 +273,15 @@ namespace ClickableTerminal
                 menu.SetTyped(Commands.Typed(terminal));
                 menu.Tick();
 
-                // A free spinning wheel sends a step every frame. The list moves at most twenty times a second.
+                // A free spinning wheel sends a step every frame, so the list moves at most twenty times a second.
                 var wheel = mouse.scroll.ReadValue().y;
-                if (Mathf.Abs(wheel) > 0.01f && Time.unscaledTime - lastScrolled > 0.05f)
+                if (!app && Mathf.Abs(wheel) > 0.01f && Time.unscaledTime - lastScrolled > 0.05f)
                 {
                     lastScrolled = Time.unscaledTime;
-                    menu.Scroll(wheel > 0f ? -2 : 2);
+                    if (!menu.ScrollSide(cursor.position, wheel > 0f ? -1 : 1))
+                    {
+                        menu.Scroll(wheel > 0f ? -2 : 2);
+                    }
                 }
             }
 
@@ -232,7 +290,6 @@ namespace ClickableTerminal
             var keys = Keyboard.current;
             var steered = Steer(keys, app);
 
-            // Enter with nothing typed clicks what the cursor is on. With something typed it sends that, as always.
             var enter = !app && keys != null && terminal.textAdded == 0
                         && (keys.enterKey.wasPressedThisFrame || keys.numpadEnterKey.wasPressedThisFrame);
 
@@ -241,23 +298,22 @@ namespace ClickableTerminal
                 lastMoved = -100f;
             }
 
-            var visible = !foreign && Time.unscaledTime - lastMoved < HideAfter;
+            var pad = PadNames != null;
+            var visible = !foreign && (pad || Time.unscaledTime - lastMoved < HideAfter);
 
 
             var label = !foreign && !app && view != null ? view.ButtonLabel : null;
             var welcome = label != null && view.ContinueTo != null;
 
-            // The button sits over the bottom of the screen. On a long page it would cover the text, and BACK is there anyway.
+            // The button sits over the bottom of the screen. On a long page it would cover the text.
             if (label != null && !welcome && text.preferredHeight > frame.rect.height - text.fontSize * 5f)
             {
                 label = null;
             }
-            // In an application BACK is its exit key and MENU closes it.
             Ui.SetActive(backButton.Space, app || (!foreign && Navigator.CanGoBack));
             Ui.SetActive(menuButton.Space, app || (!foreign && view != null && !view.IsHome && !welcome));
             Ui.SetActive(continueButton.Space, label != null);
 
-            // The size of the letters on our pages, next to BACK and MENU. The game's own text pages keep theirs.
             Ui.SetActive(smallerButton.Space, pageShown);
             Ui.SetActive(biggerButton.Space, pageShown);
 
@@ -274,20 +330,33 @@ namespace ClickableTerminal
                 : !app ? SpotUnderCursor()
                 : Under(backButton, cursor.position) ? backButton
                 : Under(menuButton, cursor.position) ? menuButton
-                : apps.SpotAt(cursor.position);
+                : AppSpot(cursor.position);
 
-            // The application highlights the entry its cursor is on, so moving its cursor there is the highlight.
+            if (pad && hit == null && !foreign && SnapToNearest(app))
+            {
+                hit = !app ? SpotUnderCursor() : AppSpot(cursor.position);
+            }
+
+            if (hit != lastHit)
+            {
+                lastHit = hit;
+                if (pageShown)
+                {
+                    menu.Focus(hit);
+                }
+            }
+
+            // The app highlights the entry its cursor is on, so moving its cursor there is the highlight.
             if (app && hit != null && hit.Hover != null)
             {
                 hit.Hover();
             }
 
-            ShowHover(app && hit != backButton && hit != menuButton ? null : hit, text.color);
+            ShowHover(app && !appWindow && hit != backButton && hit != menuButton ? null : hit, text.color);
 
-            // Over an amount the wheel changes it, on a screen with pages it turns the page.
-            // Where it does neither it is left to the game, to scroll a screen that is longer than the monitor.
+            // Where the wheel neither changes an amount nor turns a page, the game scrolls the screen.
             var running = app ? InteractiveTerminal.Application() : null;
-            var wheelIsOurs = app && ((hit != null && hit.Scroll != null) || InteractiveTerminal.HasPages(running));
+            var wheelIsOurs = app && ((hit != null && hit.Scroll != null) || InteractiveTerminal.HasPages(running) || appWindow);
 
             if (wheelIsOurs)
             {
@@ -301,8 +370,11 @@ namespace ClickableTerminal
                     }
                     else if (InteractiveTerminal.Page(running, turned < 0f))
                     {
-                        // A new page starts at its top.
                         heldScroll = 1f;
+                    }
+                    else if (appWindow)
+                    {
+                        menu.Scroll(turned > 0f ? -1 : 1);
                     }
                 }
 
@@ -325,19 +397,10 @@ namespace ClickableTerminal
             WheelTaken = pageShown || wheelIsOurs;
 
             cursorImage.color = text.color;
-            Ui.SetActive(cursor, visible);
+            Ui.SetActive(cursor, visible && !pad);
 
-            // On a controller: A clicks, X is the right click, Y the wheel click, B goes back, Select opens the menu.
             var press = mouse.leftButton.wasPressedThisFrame || enter || PadPressed(0, pad => pad.buttonSouth);
             var other = mouse.rightButton.wasPressedThisFrame || PadPressed(1, pad => pad.buttonWest);
-            var third = mouse.middleButton.wasPressedThisFrame || PadPressed(2, pad => pad.buttonNorth);
-
-            if (hit != null && hit.WheelClick != null && third)
-            {
-                refocusIn = 2;
-                PlayClick();
-                hit.WheelClick();
-            }
 
             if (press || other)
             {
@@ -371,14 +434,30 @@ namespace ClickableTerminal
             }
         }
 
-        // The game switches the screen and its light off when the player steps away. Here they stay on, only for this player.
-        // Written to the config, so it stays. The page is drawn again at the new size on the next frame.
-        private static void Resize(float by)
+        private float textTop = float.NaN;
+
+        private void KeepTextClear(TMP_Text text, bool clear)
         {
-            var scale = Settings.TextScale;
-            scale.Value = Mathf.Clamp(Mathf.Round((scale.Value + by) * 20f) / 20f, 0.6f, 1f);
+            if (float.IsNaN(textTop))
+            {
+                textTop = text.margin.y;
+            }
+
+            var want = clear ? Mathf.Max(textTop, text.fontSize * 1.9f) : textTop;
+            if (text.margin.y != want)
+            {
+                var margin = text.margin;
+                text.margin = new Vector4(margin.x, want, margin.z, margin.w);
+            }
         }
 
+        private static void Resize(float by)
+        {
+            PageScale.Change(Navigator.Current?.Page, by);
+        }
+
+        // The game switches the screen and its light off when the player steps away. Here they stay on, only for this
+        // player.
         private void KeepScreenOn()
         {
             if (!Settings.ScreenAlwaysOn.Value || terminal == null || terminal.terminalInUse || terminal.terminalUIScreen == null)
@@ -404,7 +483,7 @@ namespace ClickableTerminal
                 return;
             }
 
-            // The game fades its scrollbar in whenever its own hidden page is scrolled.
+            // The game fades its scrollbar in whenever its hidden page is scrolled.
             if (pageShown && terminal.scrollBarCanvasGroup != null)
             {
                 terminal.scrollBarCanvasGroup.alpha = 0f;
@@ -424,16 +503,14 @@ namespace ClickableTerminal
 
             if (Settings.ZoomToScreen.Value)
             {
-                // The game pulls the field of view back to its own value every frame, this runs after it.
+                // The game pulls the field of view back every frame, this runs after it.
                 zoom = Mathf.Lerp(zoom > 0f ? zoom : camera.fieldOfView, FovThatFits(camera), 6f * Time.deltaTime);
                 camera.fieldOfView = zoom;
             }
-
         }
 
-        // While the terminal is in use the game points the camera at its own "high res" texture every frame (970x580).
-        // This runs after that and hands it a bigger one of the same kind. The game's texture is left as it is,
-        // and the moment the terminal is closed the game goes back to its normal picture by itself.
+        // While the terminal is in use the game points the camera at its 970x580 texture every frame. This runs after
+        // that and hands it a bigger one. The game switches back by itself when the terminal closes.
         private void Sharpen(Camera camera)
         {
             var original = terminal.playerScreenTexHighRes;
@@ -482,7 +559,6 @@ namespace ClickableTerminal
             ReleaseSharp();
         }
 
-        // The field of view at which the terminal screen takes up most of the picture.
         private float FovThatFits(Camera camera)
         {
             frame.GetWorldCorners(Corners);
@@ -513,7 +589,6 @@ namespace ClickableTerminal
             lastMoved = Time.unscaledTime;
             PadNames = null;
 
-            // Half a screen of mouse travel crosses the whole terminal.
             var bounds = frame.rect;
             var scale = bounds.width / (Screen.width * 0.5f) * Settings.CursorSpeed.Value;
             var position = (Vector2)cursor.localPosition + delta * scale;
@@ -523,30 +598,34 @@ namespace ClickableTerminal
             cursor.localPosition = position;
         }
 
-        // The same cursor without a mouse. The left stick moves it freely, the right one scrolls,
-        // the d-pad and the arrow keys put it on the next thing that can be clicked.
-        // An application has its own use for the arrows, so there only the stick is ours.
         private bool Steer(Keyboard keys, bool app)
         {
             var now = Time.unscaledTime;
 
+            var stick = Vector2.zero;
             if (Gamepad.all.Count > 0)
             {
-                var stick = PadStick(pad => pad.leftStick);
-                if (stick.sqrMagnitude > 0.04f)
+                stick = PadStick(pad => pad.leftStick);
+
+                if (pageShown && !app)
                 {
-                    var bounds = frame.rect;
-                    var position = (Vector2)cursor.localPosition + stick * (bounds.width * 0.9f * Settings.CursorSpeed.Value * Time.unscaledDeltaTime);
-                    position.x = Mathf.Clamp(position.x, bounds.xMin, bounds.xMax);
-                    position.y = Mathf.Clamp(position.y, bounds.yMin, bounds.yMax);
-                    cursor.localPosition = position;
-                    lastMoved = now;
+                    var tab = PadPressed(5, pad => pad.leftShoulder) ? -1 : PadPressed(6, pad => pad.rightShoulder) ? 1 : 0;
+                    if (tab != 0 && menu.SwitchTab(tab > 0))
+                    {
+                        PlayClick();
+                    }
+
+                    var leaf = PadPressed(7, pad => pad.leftTrigger) ? -1 : PadPressed(8, pad => pad.rightTrigger) ? 1 : 0;
+                    if (leaf != 0)
+                    {
+                        menu.Scroll(leaf * Mathf.Max(1, menu.VisibleRows - 1));
+                    }
                 }
 
                 var turn = PadStick(pad => pad.rightStick).y;
                 if (Mathf.Abs(turn) > 0.3f)
                 {
-                    if (pageShown && !app && now - lastScrolled > 0.07f)
+                    if (pageShown && (!app || appWindow) && now - lastScrolled > 0.07f)
                     {
                         lastScrolled = now;
                         menu.Scroll(turn > 0f ? -1 : 1);
@@ -562,9 +641,15 @@ namespace ClickableTerminal
                 }
             }
 
-            // The arrow keys are the application's own while one is running, the d-pad it knows nothing about.
+            // While an app runs the arrow keys are its own. It knows nothing about the d-pad.
             var want = Vector2.zero;
-            if (PadHeld(pad => pad.dpad.up) || (!app && keys != null && keys.upArrowKey.isPressed))
+            if (stick.sqrMagnitude > 0.3f)
+            {
+                want = Mathf.Abs(stick.y) >= Mathf.Abs(stick.x)
+                    ? (stick.y > 0f ? Vector2.up : Vector2.down)
+                    : (stick.x > 0f ? Vector2.right : Vector2.left);
+            }
+            else if (PadHeld(pad => pad.dpad.up) || (!app && keys != null && keys.upArrowKey.isPressed))
             {
                 want = Vector2.up;
             }
@@ -587,7 +672,6 @@ namespace ClickableTerminal
                 return false;
             }
 
-            // One step on the press, then a run of them while it is held.
             if (want != heldStep)
             {
                 heldStep = want;
@@ -604,8 +688,8 @@ namespace ClickableTerminal
             return true;
         }
 
-        // One controller often shows up as two devices (its own and the one Steam makes of it), and the same press
-        // then arrives twice, a frame apart. So every device is looked at, and a button counts once in a while.
+        // One controller often shows up as two devices (its own and the one Steam makes), and the same press then
+        // arrives twice, a frame apart.
         private bool PadPressed(int button, System.Func<Gamepad, ButtonControl> pick)
         {
             foreach (var pad in Gamepad.all)
@@ -657,32 +741,100 @@ namespace ClickableTerminal
 
         private void Step(Vector2 direction, bool app)
         {
-            if (app)
+            if (app && direction.x != 0f)
             {
-                // Left and right turn the application's pages, up and down walk its entries.
                 var running = InteractiveTerminal.Application();
-                if (direction.x != 0f)
+                var under = apps.SpotAt(cursor.position);
+                if (under != null && under.Scroll != null)
                 {
-                    // On an amount they change it, the way the wheel does with a mouse.
-                    var under = apps.SpotAt(cursor.position);
-                    if (under != null && under.Scroll != null)
-                    {
-                        under.Scroll(direction.x > 0f);
-                    }
-                    else if (InteractiveTerminal.HasPages(running))
-                    {
-                        InteractiveTerminal.Page(running, direction.x > 0f);
-                    }
-
-                    return;
+                    under.Scroll(direction.x > 0f);
                 }
+                else if (InteractiveTerminal.HasPages(running))
+                {
+                    InteractiveTerminal.Page(running, direction.x > 0f);
+                }
+
+                return;
             }
-            else if (pageShown && direction.y != 0f && menu.ScrollFrom(cursor.position, direction.y < 0f))
+
+            Collect(app);
+            var from = (Vector2)cursor.localPosition;
+            var paged = pageShown && !app;
+            var zone = paged ? ZoneAt(from) : -1;
+
+            if (paged && direction.y != 0f && zone == MenuView.ZoneList && menu.ScrollFrom(cursor.position, direction.y < 0f))
             {
                 return;
             }
 
+            // The page is in parts (the top row, the bar above the list, the tabs, the list, the panels). A step stays
+            // in its part while it can, and only then goes over to the next part that way.
+            // In the list a sideways step never slips up to the column heads: it goes over to the tabs or the panel.
+            var at = Pick(from, direction, zone < 0 ? null : (System.Func<int, bool>)(z => z == zone), zone != MenuView.ZoneList);
+            if (at < 0 && paged)
+            {
+                foreach (var next in NextZones(zone, direction))
+                {
+                    at = Enter(next, from, direction);
+                    if (at >= 0)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (at < 0 && paged && zone == MenuView.ZoneTabs && direction.y != 0f && menu.ScrollSide(cursor.position, direction.y < 0f ? 1 : -1))
+            {
+                return;
+            }
+
+            if (at >= 0)
+            {
+                var to = targets[at];
+
+                // In an application's window the next entry may be below what is in view: the window follows it.
+                if (app && appWindow)
+                {
+                    for (var tries = 0; tries < 60 && !menu.InWindowView(frame.TransformPoint(to)); tries++)
+                    {
+                        if (!menu.Scroll(to.y < from.y ? 1 : -1))
+                        {
+                            break;
+                        }
+
+                        Collect(app);
+                        if (at >= targets.Count)
+                        {
+                            return;
+                        }
+
+                        to = targets[at];
+                    }
+                }
+
+                cursor.localPosition = to;
+                if (paged)
+                {
+                    lastIn[zones[at]] = to;
+                }
+
+                return;
+            }
+
+            if (pageShown && direction.y != 0f && (!paged || zone == MenuView.ZoneList || zone == MenuView.ZoneWindow))
+            {
+                menu.Scroll(direction.y < 0f ? 1 : -1);
+            }
+            else if (paged && zone == MenuView.ZoneList && menu.Jump(cursor.position, direction.x > 0f, frame, out var stand))
+            {
+                cursor.localPosition = stand;
+            }
+        }
+
+        private void Collect(bool app)
+        {
             targets.Clear();
+            zones.Clear();
             AddTarget(backButton);
             AddTarget(menuButton);
             AddTarget(continueButton);
@@ -692,15 +844,104 @@ namespace ClickableTerminal
             if (app)
             {
                 apps.Targets(frame, targets);
+                while (zones.Count < targets.Count)
+                {
+                    zones.Add(MenuView.ZoneList);
+                }
             }
             else if (pageShown)
             {
-                menu.Targets(frame, targets);
+                menu.Targets(frame, targets, zones);
+            }
+        }
+
+        private int ZoneAt(Vector2 point)
+        {
+            var zone = -1;
+            var best = float.MaxValue;
+            for (var i = 0; i < targets.Count; i++)
+            {
+                var distance = (targets[i] - point).sqrMagnitude;
+                if (distance < best)
+                {
+                    best = distance;
+                    zone = zones[i];
+                }
             }
 
-            // The screen is taken a line at a time. Up and down go to the nearest line that has something to click
-            // and pick what is closest on it, left and right stay on the line the cursor is on.
-            var from = (Vector2)cursor.localPosition;
+            return zone;
+        }
+
+        private static IEnumerable<int[]> NextZones(int zone, Vector2 direction)
+        {
+            var up = direction.y > 0f;
+            var down = direction.y < 0f;
+            var left = direction.x < 0f;
+            var right = direction.x > 0f;
+
+            switch (zone)
+            {
+                case MenuView.ZoneHeader:
+                    if (down)
+                    {
+                        yield return new[] { MenuView.ZoneWindow };
+                        yield return new[] { MenuView.ZoneBar };
+                        yield return new[] { MenuView.ZoneTabs, MenuView.ZoneList, MenuView.ZonePanel };
+                    }
+
+                    break;
+                case MenuView.ZoneBar:
+                    if (up)
+                    {
+                        yield return new[] { MenuView.ZoneHeader };
+                    }
+                    else if (down)
+                    {
+                        yield return new[] { MenuView.ZoneTabs, MenuView.ZoneList, MenuView.ZonePanel };
+                    }
+
+                    break;
+                case MenuView.ZoneTabs:
+                case MenuView.ZoneList:
+                case MenuView.ZonePanel:
+                    if (up)
+                    {
+                        yield return new[] { MenuView.ZoneBar };
+                        yield return new[] { MenuView.ZoneHeader };
+                    }
+                    else if (right && zone == MenuView.ZoneTabs)
+                    {
+                        yield return new[] { MenuView.ZoneList };
+                        yield return new[] { MenuView.ZonePanel };
+                    }
+                    else if (right && zone == MenuView.ZoneList)
+                    {
+                        yield return new[] { MenuView.ZonePanel };
+                    }
+                    else if (left && zone == MenuView.ZoneList)
+                    {
+                        yield return new[] { MenuView.ZoneTabs };
+                    }
+                    else if (left && zone == MenuView.ZonePanel)
+                    {
+                        yield return new[] { MenuView.ZoneList };
+                        yield return new[] { MenuView.ZoneTabs };
+                    }
+
+                    break;
+                case MenuView.ZoneWindow:
+                    if (up)
+                    {
+                        yield return new[] { MenuView.ZoneHeader };
+                    }
+
+                    break;
+            }
+        }
+
+        // The nearest target that way, among those the filter lets through. -1 when there is none.
+        private int Pick(Vector2 from, Vector2 direction, System.Func<int, bool> inZone, bool slanted)
+        {
             var side = new Vector2(direction.y, direction.x);
             var sameLine = terminal.screenText.textComponent.fontSize * 0.6f;
             var vertical = direction.y != 0f;
@@ -708,10 +949,10 @@ namespace ClickableTerminal
 
             if (vertical)
             {
-                foreach (var point in targets)
+                for (var i = 0; i < targets.Count; i++)
                 {
-                    var along = Vector2.Dot(point - from, direction);
-                    if (along > sameLine && along < nearest)
+                    var along = Vector2.Dot(targets[i] - from, direction);
+                    if ((inZone == null || inZone(zones[i])) && along > sameLine && along < nearest)
                     {
                         nearest = along;
                     }
@@ -719,40 +960,116 @@ namespace ClickableTerminal
             }
 
             var best = float.MaxValue;
-            var found = false;
-            var to = from;
-
-            foreach (var point in targets)
+            var found = -1;
+            for (var i = 0; i < targets.Count; i++)
             {
-                var offset = point - from;
+                if (inZone != null && !inZone(zones[i]))
+                {
+                    continue;
+                }
+
+                var offset = targets[i] - from;
                 var along = Vector2.Dot(offset, direction);
                 var across = Mathf.Abs(Vector2.Dot(offset, side));
-
-                var fits = vertical
-                    ? along > sameLine && along <= nearest + sameLine
-                    : along > 1f && across <= sameLine;
-
+                var fits = vertical ? along > sameLine && along <= nearest + sameLine : along > 1f && across <= sameLine;
                 var score = vertical ? across : along;
                 if (fits && score < best)
                 {
                     best = score;
-                    to = point;
-                    found = true;
+                    found = i;
                 }
             }
 
-            if (found)
+            if (found < 0 && !vertical && slanted)
             {
-                cursor.localPosition = to;
+                for (var i = 0; i < targets.Count; i++)
+                {
+                    if (inZone != null && !inZone(zones[i]))
+                    {
+                        continue;
+                    }
+
+                    var offset = targets[i] - from;
+                    var along = Vector2.Dot(offset, direction);
+                    var score = Mathf.Abs(Vector2.Dot(offset, side)) * 2f + along;
+                    if (along > sameLine && score < best)
+                    {
+                        best = score;
+                        found = i;
+                    }
+                }
             }
-            else if (pageShown && direction.y != 0f)
+
+            return found;
+        }
+
+        // Into another part: where the cursor last was in it, else what is closest across from where it comes.
+        private int Enter(int[] into, Vector2 from, Vector2 direction)
+        {
+            if (into.Length == 1 && lastIn.TryGetValue(into[0], out var was))
             {
-                menu.Scroll(direction.y < 0f ? 1 : -1);
+                for (var i = 0; i < targets.Count; i++)
+                {
+                    if (zones[i] == into[0] && (targets[i] - was).sqrMagnitude < 4f)
+                    {
+                        return i;
+                    }
+                }
             }
-            else if (pageShown && !app && menu.Jump(cursor.position, direction.x > 0f, frame, out var stand))
+
+            var side = new Vector2(direction.y, direction.x);
+            var best = float.MaxValue;
+            var found = -1;
+            for (var i = 0; i < targets.Count; i++)
             {
-                cursor.localPosition = stand;
+                if (System.Array.IndexOf(into, zones[i]) < 0)
+                {
+                    continue;
+                }
+
+                var offset = targets[i] - from;
+                var along = Vector2.Dot(offset, direction);
+                var score = Mathf.Abs(Vector2.Dot(offset, side)) + Mathf.Abs(along) * 0.3f + (along < 0f ? 100000f : 0f);
+                if (score < best)
+                {
+                    best = score;
+                    found = i;
+                }
             }
+
+            return found;
+        }
+
+        private bool SnapToNearest(bool app)
+        {
+            Collect(app);
+            var from = (Vector2)cursor.localPosition;
+            var best = -1;
+            for (var i = 0; i < targets.Count; i++)
+            {
+                if (zones[i] != MenuView.ZoneHeader && (best < 0 || (targets[i] - from).sqrMagnitude < (targets[best] - from).sqrMagnitude))
+                {
+                    best = i;
+                }
+            }
+
+            if (best < 0)
+            {
+                return false;
+            }
+
+            cursor.localPosition = targets[best];
+            return true;
+        }
+
+        private HotSpot AppSpot(Vector3 world)
+        {
+            if (!appWindow)
+            {
+                return apps.SpotAt(world);
+            }
+
+            return menu.SpotAt(world) ?? (menu.InWindowView(world) ? apps.SpotAt(world) : null);
         }
 
         private void AddTarget(HotSpot button)
@@ -760,6 +1077,7 @@ namespace ClickableTerminal
             if (button.Space != null && button.Space.gameObject.activeSelf)
             {
                 targets.Add(frame.InverseTransformPoint(button.Space.TransformPoint(button.Space.rect.center)));
+                zones.Add(MenuView.ZoneHeader);
             }
         }
 
@@ -837,12 +1155,13 @@ namespace ClickableTerminal
                 return;
             }
 
-            // The highlight stays where it is in the hierarchy and is only moved over whatever is under the cursor.
-            // Handing it from parent to parent made the whole screen rebuild every time.
+            // The highlight stays put in the hierarchy and is only moved. Handing it from parent to parent made the
+            // whole screen rebuild.
             var min = frame.InverseTransformPoint(spot.Space.TransformPoint(spot.Area.min));
             var max = frame.InverseTransformPoint(spot.Space.TransformPoint(spot.Area.max));
             Ui.Place(hover, Rect.MinMaxRect(min.x, min.y, max.x, max.y));
-            hoverImage.color = new Color(color.r, color.g, color.b, 0.3f);
+            hoverImage.color = new Color(color.r, color.g, color.b, 0.16f);
+            Ui.TintOutline(hoverFrame, color);
             Ui.SetActive(hover, true);
         }
 
@@ -864,16 +1183,17 @@ namespace ClickableTerminal
                 frame = (RectTransform)field.transform.parent;
             }
 
-            // Hides the game's text under our pages while the input field keeps taking keys.
+
             gameText = field.GetComponent<CanvasGroup>();
             if (gameText == null)
             {
                 gameText = field.gameObject.AddComponent<CanvasGroup>();
             }
 
-            menu = new MenuView(terminal, frame, text);
+            menu = new MenuView(terminal, frame, text, Mathf.Clamp(Settings.TextScale.Value, 0.6f, 1f));
+            views[menu.Scale] = menu;
 
-            // The credits sit in a box of a fixed size. A large balance gets smaller letters instead of running out of it.
+            // The credits box has a fixed size, so a large balance gets smaller letters.
             var credits = terminal.topRightText;
             if (credits != null)
             {
@@ -882,7 +1202,6 @@ namespace ClickableTerminal
                 credits.fontSizeMin = credits.fontSize * 0.4f;
                 credits.enableAutoSizing = true;
 
-                // The text may run on past the box, so its right edge is pulled in to where the box ends.
                 var box = Ui.CreditsBox(credits);
                 if (box != null)
                 {
@@ -898,10 +1217,9 @@ namespace ClickableTerminal
             }
 
             var size = text.fontSize;
-            menuButton.Space = Ui.NewButton("ClickableTerminalMenu", "[ MENU ]", frame, text, size);
+            menuButton.Space = Ui.NewButton("ClickableTerminalMenu", "[ MENU ]", frame, text, size * 0.6f, 5.8f, HeaderScale);
             menuButton.Click = () =>
             {
-                // Closing an application puts the terminal back on the page it was opened from, the main menu.
                 if (InteractiveTerminal.Running())
                 {
                     Navigator.LeaveToMenu = true;
@@ -912,9 +1230,14 @@ namespace ClickableTerminal
                     Navigator.Home(terminal);
                 }
             };
-            backButton.Space = Ui.NewButton("ClickableTerminalBack", "[ BACK ]", frame, text, size * 7f);
+            backButton.Space = Ui.NewButton("ClickableTerminalBack", "[ BACK ]", frame, text, size * 5.35f, 5.8f, HeaderScale);
             backButton.Click = () =>
             {
+                if (menu.CloseWindow())
+                {
+                    return;
+                }
+
                 if (!InteractiveTerminal.Running())
                 {
                     Navigator.Back(terminal);
@@ -925,12 +1248,11 @@ namespace ClickableTerminal
                 }
             };
 
-            smallerButton.Space = Ui.NewButton("ClickableTerminalSmaller", "-", frame, text, size * 15.2f, 1.8f);
+            smallerButton.Space = Ui.NewButton("ClickableTerminalSmaller", "-", frame, text, size * 11.85f, 1.9f, HeaderScale);
             smallerButton.Click = () => Resize(-0.05f);
-            biggerButton.Space = Ui.NewButton("ClickableTerminalBigger", "+", frame, text, size * 13f, 1.8f);
+            biggerButton.Space = Ui.NewButton("ClickableTerminalBigger", "+", frame, text, size * 10.1f, 1.9f, HeaderScale);
             biggerButton.Click = () => Resize(0.05f);
 
-            // Under pages that only wait for the player, like the welcome text.
             continueButton.Space = Ui.NewButton("ClickableTerminalContinue", "[ CONTINUE ]", frame, text, 0f);
             continueButton.Space.anchorMin = continueButton.Space.anchorMax = continueButton.Space.pivot = new Vector2(0.5f, 0f);
             continueButton.Space.sizeDelta = new Vector2(size * 9f, size * 1.7f);
@@ -940,6 +1262,7 @@ namespace ClickableTerminal
 
             hoverImage = Ui.NewBox("ClickableTerminalHover", frame);
             hover = hoverImage.rectTransform;
+            hoverFrame = Ui.NewOutline("Frame", hover, Mathf.Max(1f, size * 0.12f));
             hover.gameObject.SetActive(false);
 
             var cursorObject = new GameObject("ClickableTerminalCursor", typeof(RectTransform), typeof(RawImage));

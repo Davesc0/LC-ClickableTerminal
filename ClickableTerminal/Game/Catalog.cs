@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ClickableTerminal
 {
@@ -7,11 +8,12 @@ namespace ClickableTerminal
     {
         internal string Command;
         internal string Noun;
+        internal TerminalKeyword Keyword;
         internal int Price;
+
+        internal TerminalNode Confirm;
     }
 
-    // What to type for each thing the terminal sells, routes to or has a file on.
-    // Read from the game's keyword lists, so it covers whatever mods have added to them.
     internal class Catalog
     {
         internal readonly Dictionary<int, Target> Items = new Dictionary<int, Target>();
@@ -20,7 +22,9 @@ namespace ClickableTerminal
         internal readonly Dictionary<int, Target> Creatures = new Dictionary<int, Target>();
         internal readonly Dictionary<int, Target> Logs = new Dictionary<int, Target>();
         internal readonly Dictionary<SelectableLevel, Target> Routes = new Dictionary<SelectableLevel, Target>();
-        private readonly Dictionary<string, string> info = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> infoText = new Dictionary<string, string>();
+        private readonly Dictionary<TerminalKeyword, TerminalNode> infoNodes = new Dictionary<TerminalKeyword, TerminalNode>();
+        private static readonly System.Text.RegularExpressions.Regex Tags = new System.Text.RegularExpressions.Regex("<[^>]*>");
 
         internal static Catalog Read(Terminal terminal)
         {
@@ -52,17 +56,26 @@ namespace ClickableTerminal
                     {
                         Command = isDefault ? pair.noun.word : verb.word + " " + pair.noun.word,
                         Noun = pair.noun.word,
+                        Keyword = pair.noun,
+                        Confirm = ConfirmOf(node),
                         Price = node.itemCost
                     };
 
                     if (verb.word == "info")
                     {
-                        catalog.info[pair.noun.word] = target.Command;
+                        catalog.infoText[pair.noun.word] = node.displayText;
+                        catalog.infoNodes[pair.noun] = node;
                     }
 
-                    Put(catalog.Items, node.buyItemIndex, target, isDefault);
-                    Put(catalog.Vehicles, node.buyVehicleIndex, target, isDefault);
-                    Put(catalog.Unlockables, node.shipUnlockableID, target, isDefault);
+                    // Football's bestiary page carries vehicle index 0 (the Cruiser), so info, creature and log pages
+                    // never count as purchases.
+                    if (verb.word != "info" && node.creatureFileID < 0 && node.storyLogFileID < 0)
+                    {
+                        Put(catalog.Items, node.buyItemIndex, target, isDefault);
+                        Put(catalog.Vehicles, node.buyVehicleIndex, target, isDefault);
+                        Put(catalog.Unlockables, node.shipUnlockableID, target, isDefault);
+                    }
+
                     Put(catalog.Creatures, node.creatureFileID, target, isDefault);
                     Put(catalog.Logs, node.storyLogFileID, target, isDefault);
 
@@ -76,12 +89,86 @@ namespace ClickableTerminal
             return catalog;
         }
 
-        internal string InfoFor(Target target)
+        internal string About(Target target, int sentences, int most)
         {
-            return target != null && info.TryGetValue(target.Noun, out var command) ? command : null;
+            return target != null && infoText.TryGetValue(target.Noun, out var text) ? Excerpt(text, sentences, most) : null;
         }
 
-        // The destination and the price sit on the CONFIRM option of the route page, not on the page itself.
+        internal static string Excerpt(string raw, int sentences, int most)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+
+            var lines = Tags.Replace(raw, "").Split('\n')
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0 && line.IndexOf(':') < 0 && line.Split(' ').Length >= 4 && !IsHeading(line));
+            var text = string.Join(" ", string.Join(" ", lines).Split(new[] { ' ', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries));
+            if (text.Length == 0)
+            {
+                return null;
+            }
+
+            var end = -1;
+            for (var i = 0; i < sentences; i++)
+            {
+                var next = text.IndexOfAny(new[] { '.', '!', '?' }, end + 1);
+                if (next < 0)
+                {
+                    break;
+                }
+
+                end = next;
+            }
+
+            if (end > 0)
+            {
+                text = text.Substring(0, end + 1);
+            }
+
+            if (text.Length > most)
+            {
+                var cut = text.LastIndexOf(' ', most - 1);
+                text = text.Substring(0, cut > most / 2 ? cut : most - 1) + "...";
+            }
+
+            return text;
+        }
+
+        private static bool IsHeading(string line)
+        {
+            return line.Any(char.IsLetter) && line == line.ToUpperInvariant();
+        }
+
+        internal static string Field(string raw, string label)
+        {
+            if (string.IsNullOrEmpty(raw))
+            {
+                return null;
+            }
+
+            foreach (var line in Tags.Replace(raw, "").Split('\n'))
+            {
+                var at = line.IndexOf(label, StringComparison.OrdinalIgnoreCase);
+                var colon = at >= 0 ? line.IndexOf(':', at) : -1;
+                if (colon > 0)
+                {
+                    var value = line.Substring(colon + 1).Trim();
+                    return value.Length > 0 ? value : null;
+                }
+            }
+
+            return null;
+        }
+
+        // Typing "info <word>" can land on another keyword with the same word.
+        internal TerminalNode InfoNode(Target target)
+        {
+            return target != null && target.Keyword != null && infoNodes.TryGetValue(target.Keyword, out var node) ? node : null;
+        }
+
+        // The destination and the price sit on the CONFIRM option of the route page.
         private void AddRoute(SelectableLevel[] levels, TerminalNode node, Target target)
         {
             foreach (var option in node.terminalOptions)
@@ -96,6 +183,24 @@ namespace ClickableTerminal
                 target.Price = Math.Max(node.itemCost, confirm.itemCost);
                 Routes[levels[index]] = target;
             }
+        }
+
+        private static TerminalNode ConfirmOf(TerminalNode node)
+        {
+            if (node.terminalOptions == null)
+            {
+                return null;
+            }
+
+            foreach (var option in node.terminalOptions)
+            {
+                if (option?.noun != null && option.noun.word == "confirm")
+                {
+                    return option.result;
+                }
+            }
+
+            return null;
         }
 
         private static void Put(Dictionary<int, Target> into, int id, Target target, bool isDefault)

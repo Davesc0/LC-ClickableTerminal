@@ -6,7 +6,6 @@ namespace ClickableTerminal
 {
     internal static class Ui
     {
-        // A plain rectangle. Its position is set in the parent's own coordinates, see Place.
         internal static Image NewBox(string name, RectTransform parent)
         {
             var box = new GameObject(name, typeof(RectTransform), typeof(Image));
@@ -22,7 +21,6 @@ namespace ClickableTerminal
             return image;
         }
 
-        // Text in the terminal's own font and colour.
         internal static TextMeshProUGUI NewText(string name, RectTransform parent, TMP_Text like, float size)
         {
             var holder = new GameObject(name, typeof(RectTransform));
@@ -41,18 +39,59 @@ namespace ClickableTerminal
             return text;
         }
 
-        // A dark button with a label, pinned to the top right corner of its parent.
-        internal static RectTransform NewButton(string name, string label, RectTransform parent, TMP_Text like, float right, float width = 5.5f)
+        // Four lines, so it stays as thin as asked at any size.
+        internal static RectTransform NewOutline(string name, RectTransform parent, float thickness)
         {
-            var size = like.fontSize;
+            var holder = new GameObject(name, typeof(RectTransform));
+            holder.layer = parent.gameObject.layer;
+            var rect = (RectTransform)holder.transform;
+            rect.SetParent(parent, false);
+            Stretch(rect);
+
+            Edge(rect, new Vector2(0f, 1f), Vector2.one, new Vector2(0f, thickness));
+            Edge(rect, Vector2.zero, new Vector2(1f, 0f), new Vector2(0f, thickness));
+            Edge(rect, Vector2.zero, new Vector2(0f, 1f), new Vector2(thickness, 0f));
+            Edge(rect, new Vector2(1f, 0f), Vector2.one, new Vector2(thickness, 0f));
+            return rect;
+        }
+
+        private static void Edge(RectTransform parent, Vector2 min, Vector2 max, Vector2 size)
+        {
+            var line = NewBox("Edge", parent);
+            var rect = line.rectTransform;
+            rect.anchorMin = min;
+            rect.anchorMax = max;
+            rect.pivot = new Vector2((min.x + max.x) / 2f, (min.y + max.y) / 2f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = size;
+        }
+
+        internal static void TintOutline(RectTransform outline, Color color)
+        {
+            if (outline == null)
+            {
+                return;
+            }
+
+            foreach (var edge in outline.GetComponentsInChildren<Image>(true))
+            {
+                edge.color = color;
+            }
+        }
+
+        // Scale makes it smaller than the terminal's letters, centred on the same line.
+        internal static RectTransform NewButton(string name, string label, RectTransform parent, TMP_Text like, float right, float width = 5.5f, float scale = 1f)
+        {
+            var size = like.fontSize * scale;
 
             var box = NewBox(name, parent);
-            box.color = new Color(0f, 0f, 0f, 0.7f);
+            box.color = new Color(0f, 0f, 0f, 0.45f);
+            TintOutline(NewOutline("Frame", box.rectTransform, Mathf.Max(1f, size * 0.09f)), like.color);
 
             var rect = box.rectTransform;
             rect.anchorMin = rect.anchorMax = rect.pivot = Vector2.one;
             rect.sizeDelta = new Vector2(size * width, size * 1.5f);
-            rect.anchoredPosition = new Vector2(-right, -size * 0.3f);
+            rect.anchoredPosition = new Vector2(-right, -like.fontSize * 0.3f - (like.fontSize - size) * 0.75f);
 
             var text = NewText("Label", rect, like, size);
             text.alignment = TextAlignmentOptions.Center;
@@ -61,8 +100,7 @@ namespace ClickableTerminal
             return rect;
         }
 
-        // The shaded box the game draws behind its credits. The text's own area is wider than the box.
-        // Looked for among the text's parents and their children: the smallest picture the text starts inside of.
+        // The text's own area is wider than the box the game draws behind it.
         internal static RectTransform CreditsBox(TMP_Text credits)
         {
             if (credits == null)
@@ -113,7 +151,6 @@ namespace ClickableTerminal
             rect.offsetMin = rect.offsetMax = Vector2.zero;
         }
 
-        // A strip across the parent, measured down from its top edge.
         internal static void PinToTop(RectTransform rect, float left, float top, float right, float height)
         {
             rect.anchorMin = new Vector2(0f, 1f);

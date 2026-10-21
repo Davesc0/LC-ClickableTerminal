@@ -4,8 +4,7 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // Ties a bestiary file to the creature it is about. The file only has an id and a display name,
-    // the link is the scan node on the creature's prefab, which carries the same id.
+    // A bestiary file only has an id and a name. The scan node on the creature's prefab carries the same id.
     internal static class CreatureIndex
     {
         private static Dictionary<int, EnemyType> byScanId;
@@ -18,8 +17,8 @@ namespace ClickableTerminal
             return byScanId != null && byScanId.TryGetValue(creatureFileId, out var enemy) ? enemy : null;
         }
 
-        // By the id on the creature's scan node, and when that leads nowhere, by name. Some creatures never
-        // appear as themselves to be scanned (the cadaver grows out of an infected player), so no prefab carries their id.
+        // Some creatures are never scanned as themselves (the cadaver grows out of an infected player), so the name is
+        // the fallback.
         internal static EnemyType Find(TerminalNode file)
         {
             var enemy = Find(file.creatureFileID);
@@ -34,8 +33,7 @@ namespace ClickableTerminal
                 return enemy;
             }
 
-            // "Cadaver Blooms" in the file, "Cadaver Growths" or just "Cadaver" in the game: the first word decides,
-            // as long as only one creature starts with it.
+            // "Cadaver Blooms" in the file, "Cadaver Growths" or just "Cadaver" in the game.
             var first = name.Split(' ')[0];
             EnemyType only = null;
             foreach (var pair in byName)
@@ -54,7 +52,6 @@ namespace ClickableTerminal
             return only;
         }
 
-        // Null when the creature cannot be killed.
         internal static int? HealthOf(EnemyType enemy)
         {
             if (enemy == null || !enemy.canDie)
@@ -89,7 +86,7 @@ namespace ClickableTerminal
             byScanId = new Dictionary<int, EnemyType>();
             byName = new Dictionary<string, EnemyType>();
 
-            // No single list has every creature, a modded one may only be on its own moon.
+            // A modded creature may only be on its own moon.
             foreach (var level in levels)
             {
                 if (level != null)
@@ -100,7 +97,7 @@ namespace ClickableTerminal
                 }
             }
 
-            // Creatures that spawn on no moon at all (the kidnapper fox, the lasso man) are still loaded.
+            // Creatures that spawn on no moon (the kidnapper fox, the lasso man) are still loaded.
             foreach (var enemy in Resources.FindObjectsOfTypeAll<EnemyType>())
             {
                 Add(enemy);

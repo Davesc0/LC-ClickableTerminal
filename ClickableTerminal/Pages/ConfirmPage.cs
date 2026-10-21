@@ -3,7 +3,6 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // The "Please CONFIRM or DENY" question, laid out as figures with two buttons.
     internal static class ConfirmPage
     {
         internal static MenuPage Build(Terminal terminal, TerminalNode node)
@@ -38,7 +37,6 @@ namespace ClickableTerminal
                 return null;
             }
 
-            // Flying somewhere is one choice with no amount to it, so it does not use the order form.
             var destination = StartOfRound.Instance;
             var target = confirmed != null ? confirmed.buyRerouteToMoon : -1;
             if (destination != null && destination.levels != null && target >= 0 && target < destination.levels.Length
@@ -47,13 +45,12 @@ namespace ClickableTerminal
                 return Route(terminal, destination.levels[target], confirm, deny);
             }
 
-            var page = new MenuPage { Title = "CONFIRM", HideHeads = true };
+            var page = new MenuPage { Title = "CONFIRM", HideHeads = true, Dialog = true };
             page.Columns.Add(new Column());
             page.Columns.Add(new Column { Chars = 6 });
             page.Columns.Add(new Column { Chars = 5 });
             page.Columns.Add(new Column { Chars = 8, AlignRight = true });
 
-            // What the game is about to charge, worked out before it showed the question.
             var total = terminal.totalCostOfItems;
             var round = StartOfRound.Instance;
             var unlockables = round != null && round.unlockablesList != null ? round.unlockablesList.unlockables : null;
@@ -101,7 +98,6 @@ namespace ClickableTerminal
             }
             else
             {
-                // Something we know nothing about (eject, a mod's own question): the game's text stays.
                 return null;
             }
 
@@ -117,7 +113,14 @@ namespace ClickableTerminal
         private static MenuPage Route(Terminal terminal, SelectableLevel level, string confirm, string deny)
         {
             var cost = terminal.totalCostOfItems;
-            var page = new MenuPage { Title = "ROUTE", HideHeads = true, Plain = true };
+            var page = new MenuPage
+            {
+                Title = "ROUTE",
+                HideHeads = true,
+                Plain = true,
+                Dialog = true,
+                Extra = () => new Detail { Texture = MoonPicture.For(level), Title = MoonsPage.NameOf(level) }
+            };
             page.Columns.Add(new Column());
             page.Columns.Add(new Column { Chars = 18 });
 

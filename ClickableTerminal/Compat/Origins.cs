@@ -7,14 +7,12 @@ using HarmonyLib;
 
 namespace ClickableTerminal
 {
-    // Works out who made a piece of modded content, to sort lists into sections by creator.
     internal static class Origins
     {
         internal const string Vanilla = "VANILLA";
         internal const string Unknown = "OTHER";
 
-        // Mod managers install every package into a folder called "Team-Package". The team in front of the dash
-        // is the creator, and it is the same for all of their packages.
+        // Mod managers install into "Team-Package" folders, and the team is the creator.
         internal static string TeamOfPath(string file)
         {
             if (string.IsNullOrEmpty(file))
@@ -41,8 +39,7 @@ namespace ClickableTerminal
             }
         }
 
-        // One spelling per creator. A mod may call itself "MagicWesley" inside while its package says "Magic_Wesley":
-        // the package folders are read first, and anything that matches one of them letter for letter is written its way.
+        // A mod may call itself "MagicWesley" while its package says "Magic_Wesley". The package spelling wins.
         private static Dictionary<string, string> spellings;
 
         internal static string Spelled(string name)
@@ -97,9 +94,7 @@ namespace ClickableTerminal
             return letters.ToString();
         }
 
-        // LethalLevelLoader's own record of which bundle files each mod was read from, turned into
-        // "this mod belongs to that creator". A pack can carry content credited to other people,
-        // the package it was installed with is what puts it all in one section.
+        // A pack can carry content credited to other people. The package it came with puts it all in one section.
         internal static Dictionary<object, string> ModTeams()
         {
             var teams = new Dictionary<object, string>();
@@ -151,7 +146,6 @@ namespace ClickableTerminal
             return teams;
         }
 
-        // The creator of something LethalLevelLoader has on record: the package first, the name the mod gives itself second.
         internal static string OfExtended(object extended, Dictionary<object, string> teams)
         {
             var mod = Traverse.Create(extended).Property("ExtendedMod").GetValue();
@@ -164,7 +158,6 @@ namespace ClickableTerminal
                    ?? Clean(Traverse.Create(extended).Property("ModName").GetValue() as string);
         }
 
-        // What LethalLevelLoader and DawnLib say about each enemy, for the ones that bring no code of their own.
         internal static Dictionary<EnemyType, string> EnemyCredits()
         {
             var credits = new Dictionary<EnemyType, string>();
@@ -220,7 +213,6 @@ namespace ClickableTerminal
                 return Unknown;
             }
 
-            // An enemy with its own script: the package that script was installed with.
             try
             {
                 var script = enemy.enemyPrefab != null ? enemy.enemyPrefab.GetComponent<EnemyAI>() : null;
@@ -238,11 +230,11 @@ namespace ClickableTerminal
             {
             }
 
-            // A vanilla script on new assets (variants and the like): what the content loaders have on record.
+            // A vanilla script on new assets (variants and such).
             return credits.TryGetValue(enemy, out var credit) && credit != null ? credit : Vanilla;
         }
 
-        // "Unknown" and "Unspecified" are what a loader fills in when the mod says nothing.
+        // "Unknown" and "Unspecified" are what loaders fill in when the mod says nothing.
         internal static string Clean(string name)
         {
             if (string.IsNullOrWhiteSpace(name))

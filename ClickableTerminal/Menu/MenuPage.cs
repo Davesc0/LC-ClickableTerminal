@@ -8,76 +8,184 @@ namespace ClickableTerminal
     {
         None,
         Here,
-        Locked,
-        Utility
+        Locked
     }
 
     internal class MenuEntry
     {
-        // A small icon after the label.
         internal Marker Marker;
-
         internal string Label;
         internal string Description;
 
-        // Command is sent as it is. Prefill is only typed in, for commands that need a name after them.
         internal string Command;
+
+        // Only typed in, not sent, for commands that need a name after them.
         internal string Prefill;
-
-        // Opens another page of ours instead of sending anything.
         internal Func<MenuPage> Open;
-
-        // A label that follows what is going on, like the message being typed. Read every frame.
         internal Func<string> LiveLabel;
-
-        // Anything else a click should do, like ticking a filter.
+        internal Func<string[]> LiveCells;
         internal Action Click;
-
-        // Sent on a right click, usually "info ...", and on a click of the mouse wheel.
-        internal string AltCommand;
-        internal string WheelCommand;
-
+        internal Action AltClick;
         internal bool IsHeader;
         internal bool Dim;
 
-        // Drawn without a box: a line of text that can be clicked.
+        // No box: a line of text that can be clicked.
         internal bool Flat;
-
-        // A size bigger than the rest, for the one thing a page is about.
         internal bool Big;
 
-        // One text per column after the name, and one value per column (name included) to sort by.
+        // One text per column after the name, and one sort key per column (name included).
         internal string[] Cells;
         internal IComparable[] Keys;
-
-        // A cell with an action is a small button of its own, like the [ - ] and [ + ] of an amount.
         internal Action[] CellClicks;
-
-        // Whatever the page wants to remember about the row, like which item it stands for.
         internal int Id = -1;
 
-        // Drawn instead of text in the page's icon column: one hand or two.
+        // Hand icons in the page's icon column: one or two.
         internal int Icons;
+        internal UnityEngine.Sprite Picture;
+        internal string Sub;
+        internal bool Active;
+    }
+
+    internal class Detail
+    {
+        internal UnityEngine.Sprite Picture;
+        internal UnityEngine.Texture Texture;
+        internal string Missing;
+        internal string Title;
+        internal string Text;
+        internal readonly List<Fact> Facts = new List<Fact>();
+        internal readonly List<ToolButton> Buttons = new List<ToolButton>();
+        internal readonly List<KeyValuePair<string, List<ToolButton>>> Groups = new List<KeyValuePair<string, List<ToolButton>>>();
+        internal string Foot;
+
+        internal List<ToolButton> Group(string title)
+        {
+            var buttons = new List<ToolButton>();
+            Groups.Add(new KeyValuePair<string, List<ToolButton>>(title, buttons));
+            return buttons;
+        }
+    }
+
+    internal class Window
+    {
+        internal string Title;
+        internal UnityEngine.Texture Texture;
+        internal string Side;
+        internal bool NoPicture;
+        internal Action<string> Send;
+        internal int Longest = 30;
+        internal string Text;
+        internal readonly List<KeyValuePair<string, List<ToolButton>>> Groups = new List<KeyValuePair<string, List<ToolButton>>>();
+        internal readonly List<ToolButton> Buttons = new List<ToolButton>();
+
+        // Each group on one line: the title on the left, the buttons at the right end.
+        internal bool GroupsInLine;
+        internal readonly List<ToolButton> RightButtons = new List<ToolButton>();
+
+        internal List<ToolButton> Group(string title)
+        {
+            var buttons = new List<ToolButton>();
+            Groups.Add(new KeyValuePair<string, List<ToolButton>>(title, buttons));
+            return buttons;
+        }
+
+        // An Interactive Terminal API app's screen, followed live.
+        internal bool App;
+        internal Action Closing;
+
+        internal static Window Open { get; private set; }
+
+        internal static void Show(Window window)
+        {
+            Open = window;
+        }
+
+        internal static void Close()
+        {
+            var closed = Open;
+            Open = null;
+            closed?.Closing?.Invoke();
+        }
+
+        // Without Closing, because what it showed is gone already.
+        internal static void Drop()
+        {
+            Open = null;
+        }
+
+        internal static void ShowPage(Terminal terminal, string title, TerminalNode node)
+        {
+            if (node != null)
+            {
+                Show(new Window { Title = title, Text = Tidy(Commands.PageText(terminal, node), title) });
+            }
+        }
+
+        private static readonly System.Text.RegularExpressions.Regex Rule = new System.Text.RegularExpressions.Regex(@"^\s*[-=_]{3,}\s*$");
+        private static readonly System.Text.RegularExpressions.Regex Label = new System.Text.RegularExpressions.Regex(@"^([A-Z][A-Z '\-]{2,24}):");
+        private static readonly System.Text.RegularExpressions.Regex Spaces = new System.Text.RegularExpressions.Regex(@"\n{3,}");
+
+        internal static string Tidy(string text, string title)
+        {
+            var lines = new List<string>();
+            var key = Commands.Normalize(title ?? "");
+
+            foreach (var raw in (text ?? "").Replace("\r", "").Split('\n'))
+            {
+                if (Rule.IsMatch(raw))
+                {
+                    continue;
+                }
+
+                // "177-Burrow" under the title BURROW.
+                if (lines.Count == 0 && key.Length > 0 && raw.Trim().Length > 0 && Commands.Normalize(raw).EndsWith(key))
+                {
+                    continue;
+                }
+
+                if (lines.Count == 0 && raw.Trim().Length == 0)
+                {
+                    continue;
+                }
+
+                lines.Add(Label.Replace(raw.Trim(), "<alpha=#FF>$1:<alpha=#BB>"));
+            }
+
+            return "<alpha=#BB>" + Spaces.Replace(string.Join("\n", lines), "\n\n").Trim();
+        }
+    }
+
+    internal class Fact
+    {
+        internal string Label;
+        internal string Value;
     }
 
     internal class Column
     {
         internal string Header;
 
-        // The least room the column gets, in letters. It grows to fit its longest value, up to MaxChars when that is set.
+        // Least room in letters. It grows to the longest value, up to MaxChars.
         internal int Chars;
         internal int MaxChars;
         internal bool AlignRight;
-        internal bool AlignCenter;
+
+        // A share of the list's width instead of what the values need.
+        internal float Share;
     }
 
     internal class ToolButton
     {
         internal string Label;
         internal bool Active;
-
-        // Greyed out: a switch that is off.
         internal bool Off;
+        internal bool Primary;
+
+        // Keeps its small width in a panel's row, the others share the rest.
+        internal bool Narrow;
+
+        // Only the label, no frame, not clickable.
+        internal bool Bare;
         internal Action Click;
     }
 
@@ -85,25 +193,48 @@ namespace ClickableTerminal
     {
         internal string Title;
         internal string Hint;
+        internal string Subtitle;
 
-        // One line above the table, for totals and the like.
+        // Where the screen is narrow the tabs become buttons on top.
+        internal List<MenuEntry> Sidebar;
+        internal Func<MenuEntry, Detail> DetailFor;
+        internal Func<Detail> Extra;
         internal string Summary;
 
-        // Entries kept above the table, out of the sorting and the filters. They click like rows.
+        // Kept above the table, out of the sorting and the filters.
         internal List<MenuEntry> Pinned = new List<MenuEntry>();
-
-        // For tables that are not really tables, like the confirmation page: no column headers, no shaded rows.
         internal bool HideHeads;
         internal bool Plain;
+        internal bool Dialog;
+        internal UnityEngine.Texture Picture;
+        internal float PictureAspect = 4f / 3f;
 
-        // Rows closer together, for pages that are mostly sentences.
+        // Drawn here a few times a second while the game is not drawing it.
+        internal UnityEngine.Camera Camera;
+        internal bool LivePanels;
+        internal Action<string> Send;
+        internal ToolButton Corner;
+        internal bool SelectRows;
+        internal MenuEntry Pick;
+
+        // Against the terminal's own letter size. 0 means the TextScale setting decides.
+        internal float Scale;
+        internal float ScaleMin = 0.6f;
+        internal float ScaleMax = 1f;
+
+        internal MenuPage Sized(float scale, float min, float max)
+        {
+            Scale = scale;
+            ScaleMin = min;
+            ScaleMax = max;
+            return this;
+        }
+
         internal bool Dense;
-
-        // Which column shows icons instead of text, -1 for none.
         internal int IconColumn = -1;
         internal List<MenuEntry> Entries = new List<MenuEntry>();
 
-        // Column 0 is the name. Empty means a plain list, with descriptions under the labels.
+        // Column 0 is the name. Empty means a plain list with descriptions under the labels.
         internal List<Column> Columns = new List<Column>();
         internal Action<int> SortBy;
         internal List<ToolButton> Tools = new List<ToolButton>();
@@ -111,14 +242,13 @@ namespace ClickableTerminal
         internal bool HasDescriptions => Entries.Any(entry => !string.IsNullOrEmpty(entry.Description));
     }
 
-    // What the player picked on a page: sorting and filters. Kept while the game runs.
     internal class PageState
     {
         internal int SortColumn = -1;
         internal bool Descending;
         private readonly HashSet<string> flags = new HashSet<string>();
 
-        // First click sorts, the second turns it around, the third goes back to the game's own order.
+        // First click sorts, the second turns it around, the third goes back to the game's order.
         internal void SortBy(int column)
         {
             if (SortColumn != column)

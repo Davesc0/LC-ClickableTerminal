@@ -5,12 +5,9 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // The items picked in the store, to be ordered together. Kept by their place in the game's list of items.
+    // Kept by place in the game's item list.
     internal static class Cart
     {
-        private const int DropshipHolds = 12;
-        private const int MostOfOne = 10;
-
         private static readonly Dictionary<int, int> Amounts = new Dictionary<int, int>();
 
         internal static int Count => Amounts.Values.Sum();
@@ -22,7 +19,7 @@ namespace ClickableTerminal
             return Amounts.TryGetValue(item, out var amount) ? amount : 0;
         }
 
-        // Rounded the way the game does it when it takes the money.
+        // Rounded the way the game rounds when it takes the money.
         internal static int PriceOf(Terminal terminal, int item)
         {
             var items = terminal.buyableItemsList;
@@ -41,11 +38,9 @@ namespace ClickableTerminal
             return Amounts.Sum(pair => PriceOf(terminal, pair.Key) * pair.Value);
         }
 
-        // The same limits the game has for an order: what the dropship holds, and what the crew can pay.
         internal static bool CanAdd(Terminal terminal, int item)
         {
-            return Of(item) < MostOfOne
-                   && Count + terminal.numberOfItemsInDropship < DropshipHolds
+            return Count + terminal.numberOfItemsInDropship < DropshipLimit.Value
                    && Total(terminal) + PriceOf(terminal, item) <= terminal.groupCredits;
         }
 
@@ -98,106 +93,29 @@ namespace ClickableTerminal
         {
             internal string Name;
             internal int Amount;
+            internal int Bought;
             internal int Cost;
-            internal bool Ordered;
+            internal string Answer;
         }
 
-        internal static MenuPage Build(Terminal terminal)
-        {
-            Cart.Tidy(terminal);
-
-            var page = new MenuPage { Title = "CART", HideHeads = true };
-            page.Columns.Add(new Column());
-            page.Columns.Add(new Column { Chars = 5 });
-            page.Columns.Add(new Column { Chars = 12, AlignRight = true });
-            page.Columns.Add(new Column { Chars = 5 });
-
-            var items = terminal.buyableItemsList;
-            var total = Cart.Total(terminal);
-
-            if (Cart.Count == 0)
-            {
-                Space(page);
-                page.Entries.Add(new MenuEntry { Label = "The cart is empty.", Big = true });
-                page.Entries.Add(new MenuEntry { Label = "Click items in the store to put them in." });
-                Space(page);
-                page.Entries.Add(new MenuEntry { Label = "[ BACK ]", Click = () => Navigator.Back(terminal) });
-                return page;
-            }
-
-            page.Entries.Add(new MenuEntry { Label = "YOUR ORDER", IsHeader = true });
-
-            foreach (var line in Cart.Lines)
-            {
-                var item = line.Key;
-                var amount = line.Value;
-
-                page.Entries.Add(new MenuEntry
-                {
-                    Label = items[item].itemName,
-                    Cells = new[] { "[ - ]", $"x{amount}  ${Cart.PriceOf(terminal, item) * amount}", Cart.CanAdd(terminal, item) ? "[ + ]" : "" },
-                    CellClicks = new Action[]
-                    {
-                        () =>
-                        {
-                            Cart.Remove(item);
-                            Navigator.Rebuild(terminal);
-                        },
-                        null,
-                        () =>
-                        {
-                            Cart.Add(terminal, item);
-                            Navigator.Rebuild(terminal);
-                        }
-                    }
-                });
-            }
-
-            Space(page);
-            Fact(page, "Total", "$" + total);
-            Fact(page, "Credits left after", "$" + Mathf.Max(0, terminal.groupCredits - total));
-            Fact(page, "In the dropship", $"{Cart.Count + terminal.numberOfItemsInDropship} of 12");
-            Space(page);
-            page.Entries.Add(new MenuEntry { Label = "[ ORDER ]", Click = () => Order(terminal) });
-            page.Entries.Add(new MenuEntry
-            {
-                Label = "[ EMPTY THE CART ]",
-                Click = () =>
-                {
-                    Cart.Clear();
-                    Navigator.Rebuild(terminal);
-                }
-            });
-            return page;
-        }
-
-        // Every line is bought the way a player would: the item's command, the amount, then "confirm".
-        // So whatever a mod has to say about a purchase (its own price, a refusal) still counts.
+        // Every line is bought the way "confirm" buys it, without the question pages. The game's checks and every mod
+        // that acts on a purchase still run.
         private static bool ordering;
 
-        private static void Order(Terminal terminal)
+        internal static void Order(Terminal terminal)
         {
-            if (ordering)
+            if (ordering || Cart.Count == 0)
             {
                 return;
             }
 
             ordering = true;
-            Navigator.DropCurrent();
-            Navigator.Open(() => Waiting(terminal));
+            Window.Show(new Window { Title = "CART", Text = "Ordering..." });
             terminal.StartCoroutine(OrderLines(terminal, Cart.Lines.ToList()));
         }
 
-        private static MenuPage Waiting(Terminal terminal)
-        {
-            var page = new MenuPage { Title = "CART", Plain = true };
-            page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
-            page.Entries.Add(new MenuEntry { Label = "Ordering...", Big = true });
-            return page;
-        }
-
-        // A line a frame: mods that act on a purchase (instant delivery, their own prices) get to finish one
-        // before the next comes. A question left open on the way is answered "deny", so nothing is left waiting.
+        // One line a frame, so mods that act on a purchase (instant delivery, their own prices) finish one before the
+        // next.
         private static System.Collections.IEnumerator OrderLines(Terminal terminal, List<KeyValuePair<int, int>> cart)
         {
             var catalog = Catalog.Read(terminal);
@@ -207,125 +125,95 @@ namespace ClickableTerminal
             foreach (var pair in cart)
             {
                 var item = pair.Key;
-                var amount = pair.Value;
-                var line = new Line { Name = items[item].itemName, Amount = amount };
+                var line = new Line { Name = items[item].itemName, Amount = pair.Value };
                 lines.Add(line);
 
-                if (!catalog.Items.TryGetValue(item, out var target) || !terminal.terminalInUse)
+                if (!catalog.Items.TryGetValue(item, out var target) || target.Confirm == null)
                 {
+                    line.Answer = "The store does not sell it any more.";
                     continue;
                 }
 
-                var credits = terminal.groupCredits;
-                var onRoute = terminal.numberOfItemsInDropship;
-
-                try
+                // The game takes at most twelve of one thing at once.
+                var left = pair.Value;
+                while (left > 0)
                 {
-                Navigator.Quietly(() =>
-                {
-                    Commands.Submit(terminal, target.Command);
+                    var credits = terminal.groupCredits;
+                    var onRoute = terminal.numberOfItemsInDropship;
+                    var amount = Mathf.Min(left, 12);
+                    var answer = Commands.Act(terminal, target.Confirm, amount);
+                    left -= amount;
 
-                    var asked = terminal.currentNode;
-                    if (!AmountStepper.AppliesTo(terminal, asked) || asked.buyItemIndex != item)
+                    yield return null;
+
+                    var took = terminal.groupCredits < credits || terminal.numberOfItemsInDropship > onRoute;
+                    if (took)
                     {
-                        return;
+                        line.Bought += amount;
+                        line.Cost += Mathf.Max(0, credits - terminal.groupCredits);
                     }
-
-                    if (amount > 1)
+                    else
                     {
-                        terminal.playerDefinedAmount = amount;
-                        terminal.LoadNewNodeIfAffordable(asked);
-                        if (terminal.currentNode != asked)
-                        {
-                            return;
-                        }
+                        line.Answer = FirstLine(answer);
+                        break;
                     }
-
-                    Commands.Submit(terminal, "confirm");
-                });
-                }
-                catch (System.Exception e)
-                {
-                    Plugin.mlg.LogWarning($"Cart: ordering {line.Name} failed: {e}");
                 }
 
-                yield return null;
-
-                LeaveQuestion(terminal);
-                line.Ordered = terminal.groupCredits < credits || terminal.numberOfItemsInDropship > onRoute;
-                line.Cost = Mathf.Max(0, credits - terminal.groupCredits);
+                if (line.Bought > 0)
+                {
+                    for (var i = 0; i < line.Bought; i++)
+                    {
+                        Cart.Remove(item);
+                    }
+                }
             }
 
-            Cart.Clear();
             ordering = false;
-            Navigator.DropCurrent();
-            Navigator.Open(() => Receipt(terminal, lines));
+            Window.Show(Receipt(terminal, lines));
+            Navigator.Rebuild(terminal);
         }
 
-        private static void LeaveQuestion(Terminal terminal)
+        private static string FirstLine(string answer)
         {
-            var node = terminal.currentNode;
-            if (node != null && node.overrideOptions && node.terminalOptions != null
-                && node.terminalOptions.Any(option => option?.noun != null && option.noun.word == "deny"))
-            {
-                Navigator.Quietly(() => Commands.Submit(terminal, "deny"));
-            }
+            var text = System.Text.RegularExpressions.Regex.Replace(answer ?? "", "<[^>]*>", "");
+            return text.Split('\n').Select(each => each.Trim()).FirstOrDefault(each => each.Length > 0) ?? "";
         }
 
-        private static MenuPage Receipt(Terminal terminal, List<Line> lines)
+        // Lines that did not go through stay in the cart.
+        private static Window Receipt(Terminal terminal, List<Line> lines)
         {
-            var page = new MenuPage { Title = "RECEIPT", HideHeads = true, Plain = true };
-            page.Columns.Add(new Column());
-            page.Columns.Add(new Column { Chars = 5 });
-            page.Columns.Add(new Column { Chars = 12, AlignRight = true });
+            var bought = lines.Where(line => line.Bought > 0).ToList();
+            var refused = lines.Where(line => line.Bought < line.Amount).ToList();
+            var text = new System.Text.StringBuilder();
 
-            var ordered = lines.Where(line => line.Ordered).ToList();
-            var refused = lines.Where(line => !line.Ordered).ToList();
-
-            Space(page);
-            page.Entries.Add(new MenuEntry { Label = ordered.Count > 0 ? "Order placed" : "Nothing was ordered", Big = true });
-            Space(page);
-
-            foreach (var line in ordered)
+            foreach (var line in bought)
             {
-                page.Entries.Add(new MenuEntry { Label = line.Name, Cells = new[] { "x" + line.Amount, "$" + line.Cost } });
+                text.Append(line.Bought).Append("x ").Append(line.Name).Append("<pos=75%>$").Append(line.Cost).Append('\n');
             }
 
-            if (ordered.Count > 0)
+            if (bought.Count > 0)
             {
-                Space(page);
-                page.Entries.Add(new MenuEntry { Label = "Total", Cells = new[] { "", "$" + ordered.Sum(line => line.Cost) } });
-                page.Entries.Add(new MenuEntry { Label = "New balance", Cells = new[] { "", "$" + terminal.groupCredits } });
+                text.Append("\nTotal<pos=75%>$").Append(bought.Sum(line => line.Cost));
+                text.Append("\nNew balance<pos=75%>$").Append(terminal.groupCredits);
+                text.Append("\n").Append(terminal.numberOfItemsInDropship).Append(" on the way. The dropship delivers on the hour.\n");
             }
 
             if (refused.Count > 0)
             {
-                Space(page);
-                page.Entries.Add(new MenuEntry { Label = "COULD NOT BE ORDERED", IsHeader = true });
+                text.Append(bought.Count > 0 ? "\n" : "").Append("NOT ORDERED (still in the cart)\n");
                 foreach (var line in refused)
                 {
-                    page.Entries.Add(new MenuEntry { Label = line.Name, Cells = new[] { "x" + line.Amount, "" }, Dim = true });
+                    text.Append(line.Amount - line.Bought).Append("x ").Append(line.Name);
+                    if (!string.IsNullOrEmpty(line.Answer))
+                    {
+                        text.Append("\n<alpha=#99>  ").Append(line.Answer).Append("<alpha=#FF>");
+                    }
+
+                    text.Append('\n');
                 }
             }
 
-            if (ordered.Count > 0)
-            {
-                Space(page);
-                page.Entries.Add(new MenuEntry { Label = $"{terminal.numberOfItemsInDropship} on the way. The dropship delivers on the hour.", Dim = true });
-            }
-
-            ResultPages.AddBack(page, terminal, null);
-            return page;
-        }
-
-        private static void Fact(MenuPage page, string label, string value)
-        {
-            page.Entries.Add(new MenuEntry { Label = label, Cells = new[] { "", value, "" } });
-        }
-
-        private static void Space(MenuPage page)
-        {
-            page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
+            return new Window { Title = bought.Count > 0 ? "ORDER PLACED" : "NOTHING WAS ORDERED", Text = text.ToString().TrimEnd() };
         }
     }
 }

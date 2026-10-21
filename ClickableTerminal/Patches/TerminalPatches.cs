@@ -5,8 +5,8 @@ namespace ClickableTerminal.Patches
     [HarmonyPatch(typeof(Terminal))]
     internal static class TerminalPatches
     {
-        // Buying is checked against the same list the game draws for the quota, so the list itself is made longer or shorter.
-        // The game draws it from the day's seed, the same on every player's side. What is added here is drawn the same way.
+        // Buying is checked against the same list the game draws for the quota, so the list itself is resized. It is
+        // drawn from the day's seed, the same for every player.
         [HarmonyPatch(nameof(Terminal.RotateShipDecorSelection))]
         [HarmonyPostfix]
         private static void StockDecorations(Terminal __instance)
@@ -52,8 +52,7 @@ namespace ClickableTerminal.Patches
             }
         }
 
-        // The game waits a whole second after the terminal opens before the input field takes keys,
-        // so the first letters typed are lost. A fifth of that is enough for the field to be ready.
+        // The game waits a whole second before the input field takes keys, so the first letters typed are lost.
         [HarmonyPatch("selectTextFieldDelayed")]
         [HarmonyPrefix]
         private static bool QuickerTyping(Terminal __instance, ref System.Collections.IEnumerator __result)
@@ -85,6 +84,28 @@ namespace ClickableTerminal.Patches
 
         [HarmonyPatch(nameof(Terminal.OnSubmit))]
         [HarmonyPrefix]
+        [HarmonyPriority(Priority.First)]
+        private static bool TypedIntoWindow(Terminal __instance)
+        {
+            if (Commands.Submitting || !__instance.terminalInUse)
+            {
+                return true;
+            }
+
+            var send = Window.Open != null ? Window.Open.Send : Settings.OwnPages.Value ? Navigator.Current?.Page?.Send : null;
+            if (send == null)
+            {
+                return true;
+            }
+
+            var typed = Commands.Typed(__instance);
+            Commands.Type(__instance, "");
+            send(typed);
+            return false;
+        }
+
+        [HarmonyPatch(nameof(Terminal.OnSubmit))]
+        [HarmonyPrefix]
         private static void NoteSubmitted(Terminal __instance)
         {
             Navigator.Submitted = __instance.terminalInUse ? Commands.Typed(__instance).Trim() : null;
@@ -102,7 +123,7 @@ namespace ClickableTerminal.Patches
             }
         }
 
-        // The scan record is saved with the game, so it is left alone. The refusal is skipped instead.
+        // The scan record is saved with the game, so it is left alone and the refusal is skipped instead.
         [HarmonyPatch("AttemptLoadCreatureFileNode")]
         [HarmonyPrefix]
         private static bool OpenAnyCreatureFile(Terminal __instance, TerminalNode node)

@@ -7,9 +7,6 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // Puts the mouse on screens drawn with the Interactive Terminal API. The screen stays the application's own:
-    // this only works out which lines belong to which entry of its list, moves its cursor to the one under the mouse,
-    // and presses its buttons for it.
     internal class InteractiveMouse
     {
         private static readonly Regex Tags = new Regex("<[^>]+>", RegexOptions.Compiled);
@@ -22,7 +19,6 @@ namespace ClickableTerminal
 
         private bool screenChanged;
 
-        // True once after the application has put another of its screens up.
         internal bool TakeScreenChange()
         {
             var changed = screenChanged;
@@ -37,22 +33,21 @@ namespace ClickableTerminal
             scannedMenu = null;
         }
 
-        // Called every frame while an application is on screen.
-        internal void Tick(TMP_InputField field, TMP_Text text)
+        internal void Tick(string screen, TMP_Text text)
         {
             var app = InteractiveTerminal.Application();
             var menu = InteractiveTerminal.Menu(app);
 
-            // The application writes its screen again whenever its cursor moves. The old areas stay until the new
-            // letters are in place, a frame or two later, so a click in between still lands.
+            // The app rewrites its screen whenever its cursor moves. The old areas stay until the new letters are in, so
+            // a click in between still lands.
             if (!ReferenceEquals(menu, scannedMenu))
             {
                 screenChanged = true;
             }
 
-            if (field.text != scanned || !ReferenceEquals(menu, scannedMenu))
+            if (screen != scanned || !ReferenceEquals(menu, scannedMenu))
             {
-                scanned = field.text;
+                scanned = screen;
                 scannedMenu = menu;
                 scanIn = 2;
             }
@@ -63,7 +58,6 @@ namespace ClickableTerminal
             }
         }
 
-        // Where the cursor can be put to stand on an entry, for moving it without a mouse.
         internal void Targets(RectTransform frame, List<Vector2> into)
         {
             foreach (var spot in spots)
@@ -104,8 +98,7 @@ namespace ClickableTerminal
                 contents[l] = LineText(info, info.lineInfo[l]);
             }
 
-            // The entries are printed in order, each starting with its name. So the names are looked for one after
-            // the other, each from where the last one was found.
+            // Entries print in order, so each name is searched for from where the last one was found.
             var starts = new List<int>();
             var found = new List<int>();
             var from = 0;
@@ -138,7 +131,6 @@ namespace ClickableTerminal
                 var element = elements.GetValue(index);
                 var first = starts[s];
 
-                // An entry runs to the line before the next one. The last one ends where its text does.
                 var last = s + 1 < starts.Count ? starts[s + 1] - 1 : first;
                 if (s + 1 == starts.Count)
                 {
@@ -179,7 +171,7 @@ namespace ClickableTerminal
             }
         }
 
-        // The start of the name as it shows on screen: no colour tags, and short enough to survive a line wrap.
+        // No colour tags, and short enough to survive a line wrap.
         private static string Key(string name)
         {
             var plain = Tags.Replace(name, "").Split('\n')[0].Trim();

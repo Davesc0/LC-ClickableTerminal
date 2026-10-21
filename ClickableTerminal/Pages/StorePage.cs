@@ -7,24 +7,11 @@ namespace ClickableTerminal
 {
     internal static class StorePage
     {
-        private const string Affordable = "afford";
-        private const string Folded = "fold:";
-
         private const string Items = "ITEMS";
         private const string Vehicles = "VEHICLES";
         private const string Upgrades = "SHIP UPGRADES";
         private const string Decorations = "DECORATIONS";
         private const string Suits = "SUITS";
-
-        // The five kinds of thing the store sells, with the short name each has on its switch.
-        private static readonly KeyValuePair<string, string>[] Groups =
-        {
-            new KeyValuePair<string, string>(Items, "ITEMS"),
-            new KeyValuePair<string, string>(Vehicles, "VEHICLES"),
-            new KeyValuePair<string, string>(Upgrades, "UPGRADES"),
-            new KeyValuePair<string, string>(Decorations, "DECOR"),
-            new KeyValuePair<string, string>(Suits, "SUITS")
-        };
 
         private class Section
         {
@@ -33,55 +20,504 @@ namespace ClickableTerminal
             internal List<MenuEntry> Rows;
         }
 
+        private class Facts
+        {
+            internal Sprite Picture;
+            internal string Name;
+            internal string Text;
+            internal string Kind;
+            internal string Weight;
+            internal string Price;
+            internal int Owned;
+            internal Target Target;
+            internal bool IsItem;
+            internal int Item;
+            internal TerminalNode Info;
+            internal bool Utility;
+        }
+
         private static readonly PageState State = new PageState();
+        private static readonly Dictionary<MenuEntry, Facts> About = new Dictionary<MenuEntry, Facts>();
+        private static string open;
 
         internal static MenuPage Build(Terminal terminal)
         {
-            return Settings.StoreCategoriesFirst.Value ? Landing(terminal) : Single(terminal);
-        }
-
-        // The store as a short list of its parts. Each opens a page of its own.
-        private static MenuPage Landing(Terminal terminal)
-        {
-            var sections = Sections(terminal);
             var hidden = Hidden();
-            var page = new MenuPage { Title = "STORE" };
-
-            foreach (var group in Groups)
-            {
-                var name = group.Key;
-                var count = sections.Where(section => section.Group == name && !hidden.Contains(section.Title)).Sum(section => section.Rows.Count);
-                if (count == 0 || hidden.Contains(name))
-                {
-                    continue;
-                }
-
-                var about = count + " on offer";
-                var sales = name == Items ? OnSale(terminal)
-                    : sections.Where(section => section.Group == name).Sum(section => section.Rows.Count(row => row.Id > 0));
-                about += sales > 0 ? $", {sales} on sale" : "";
-
-                page.Entries.Add(new MenuEntry { Label = name, Description = about, Open = () => GroupPage(terminal, name) });
-            }
-
-            if (page.Entries.Count == 0)
+            var sections = Sections(terminal).Where(section => section.Rows.Count > 0 && !hidden.Contains(section.Title) && !hidden.Contains(section.Group)).ToList();
+            if (sections.Count == 0)
             {
                 return null;
             }
 
-            if (terminal.buyableItemsList != null && terminal.buyableItemsList.Length > 0)
+            var hasSaved = SavedCarts.All.Count > 0;
+            if (sections.All(section => section.Title != open) && !(open == SavedTab && hasSaved))
             {
-                Cart.Tidy(terminal);
-                page.Entries.Add(new MenuEntry
+                open = sections.Count > 0 ? sections[0].Title : null;
+            }
+
+            var shown = sections.FirstOrDefault(section => section.Title == open);
+            var items = shown != null && shown.Group == Items;
+            var sales = OnSale(terminal);
+
+            var page = new MenuPage
+            {
+                Title = "STORE",
+                Subtitle = open == SavedTab ? "Carts you saved, to order again" : shown != null ? shown.Title + (sales > 0 ? $"  -  {sales} on sale" : "") : null,
+                Hint = "Click: select  Right: info",
+                SelectRows = true,
+                Scale = 0.7f,
+                ScaleMin = 0.6f,
+                ScaleMax = 0.75f,
+                Sidebar = new List<MenuEntry>(),
+                DetailFor = entry => SavedRows.TryGetValue(entry, out var saved) ? SavedDetail(terminal, saved) : Detail(terminal, entry),
+                Extra = items || Cart.Count > 0 ? (Func<Detail>)(() => CartPanel(terminal)) : null,
+                SortBy = column =>
                 {
-                    Label = "CART",
-                    Description = Cart.Count == 0 ? "Empty. Click items to put them in, then order them together."
-                        : $"{Cart.Count} items for ${Cart.Total(terminal)}, waiting to be ordered.",
-                    Open = () => CartPage.Build(terminal)
+                    State.SortBy(column);
+                    Navigator.Rebuild(terminal);
+                }
+            };
+
+            foreach (var section in sections)
+            {
+                var title = section.Title;
+                page.Sidebar.Add(new MenuEntry
+                {
+                    Label = title,
+                    Active = title == open,
+                    Click = () =>
+                    {
+                        open = title;
+                        Navigator.Rebuild(terminal);
+                    }
                 });
             }
 
+            if (hasSaved)
+            {
+                page.Sidebar.Add(new MenuEntry
+                {
+                    Label = SavedTab,
+                    Active = open == SavedTab,
+                    Click = () =>
+                    {
+                        open = SavedTab;
+                        Navigator.Rebuild(terminal);
+                    }
+                });
+            }
+
+            if (open == SavedTab)
+            {
+                Cart.Tidy(terminal);
+                page.Extra = () => CartPanel(terminal);
+                AddSavedRows(terminal, page);
+                return page;
+            }
+
+            page.Columns.Add(new Column { Header = State.HeaderFor("NAME", 0) });
+            if (items)
+            {
+                page.Columns.Add(new Column { Header = "", Chars = 3 });
+            }
+
+            page.Columns.Add(new Column { Header = State.HeaderFor("PRICE", items ? 2 : 1), Chars = 5, AlignRight = true });
+
+            Cart.Tidy(terminal);
+
+            if (shown == null)
+            {
+                page.Entries.Add(new MenuEntry { Label = "Nothing on offer here.", Dim = true });
+                return page;
+            }
+
+            foreach (var row in shown.Rows)
+            {
+                var picked = items ? Cart.Of(row.Id) : 0;
+                if (items)
+                {
+                    var item = row.Id;
+                    row.Cells = new[] { Cart.CanAdd(terminal, item) ? "[+]" : "", row.Cells[1] };
+                    row.Keys = new[] { row.Keys[0], picked, row.Keys[2] };
+                    row.CellClicks = new Action[]
+                    {
+                        () =>
+                        {
+                            Cart.Add(terminal, item);
+                            Navigator.Rebuild(terminal);
+                        },
+                        null
+                    };
+                }
+                else
+                {
+                    row.Cells = new[] { row.Cells[1] };
+                    row.Keys = new[] { row.Keys[0], row.Keys[2] };
+                }
+
+                if (picked > 0)
+                {
+                    row.Sub = $"IN CART: {picked}" + (row.Sub != null ? "  " + row.Sub : "");
+                }
+            }
+
+            page.Entries.AddRange(Family(State.Sorted(shown.Rows)));
             return page;
+        }
+
+        private static Detail Detail(Terminal terminal, MenuEntry entry)
+        {
+            if (!About.TryGetValue(entry, out var facts))
+            {
+                return null;
+            }
+
+            var detail = new Detail { Picture = facts.Picture, Title = facts.Name, Text = facts.Text };
+
+            if (facts.IsItem)
+            {
+                var item = facts.Item;
+                detail.Buttons.Add(new ToolButton
+                {
+                    Label = Cart.Of(item) > 0 ? $"ADD TO CART ({Cart.Of(item)})" : "ADD TO CART",
+                    Off = !Cart.CanAdd(terminal, item),
+                    Click = () =>
+                    {
+                        Cart.Add(terminal, item);
+                        Navigator.Rebuild(terminal);
+                    }
+                });
+                if (Cart.Of(item) > 0)
+                {
+                    detail.Buttons.Add(new ToolButton
+                    {
+                        Label = "REMOVE",
+                        Click = () =>
+                        {
+                            Cart.Remove(item);
+                            Navigator.Rebuild(terminal);
+                        }
+                    });
+                }
+
+                detail.Buttons.Add(new ToolButton { Label = "BUY NOW", Click = () => AskToBuy(terminal, facts) });
+            }
+            else
+            {
+                detail.Buttons.Add(new ToolButton { Label = "BUY", Click = () => AskToBuy(terminal, facts) });
+            }
+
+            if (facts.Info != null)
+            {
+                detail.Buttons.Add(new ToolButton { Label = "INFO", Click = () => Window.ShowPage(terminal, facts.Name.ToUpperInvariant(), facts.Info) });
+            }
+
+            detail.Facts.Add(new Fact { Label = "Type", Value = facts.Kind });
+            if (facts.Weight != null)
+            {
+                detail.Facts.Add(new Fact { Label = "Weight", Value = facts.Weight });
+            }
+
+            detail.Facts.Add(new Fact { Label = "Price", Value = facts.Price });
+            if (facts.IsItem)
+            {
+                detail.Facts.Add(new Fact { Label = "Utility slot", Value = facts.Utility ? "Yes" : "No" });
+            }
+            if (facts.Owned > 0)
+            {
+                detail.Facts.Add(new Fact { Label = "On the ship", Value = facts.Owned.ToString() });
+            }
+
+            return detail;
+        }
+
+        internal static void OfferUpgrade(Terminal terminal, string name, string text)
+        {
+            var window = new Window { Title = "NO " + name.ToUpperInvariant(), Text = text };
+
+            var catalog = Catalog.Read(terminal);
+            var unlockables = StartOfRound.Instance != null && StartOfRound.Instance.unlockablesList != null
+                ? StartOfRound.Instance.unlockablesList.unlockables
+                : null;
+            var key = Commands.Normalize(name);
+            var found = unlockables == null ? default : catalog.Unlockables.FirstOrDefault(pair =>
+                pair.Key < unlockables.Count && unlockables[pair.Key] != null && Commands.Normalize(unlockables[pair.Key].unlockableName) == key);
+
+            if (found.Value != null && found.Value.Confirm != null)
+            {
+                var target = found.Value;
+                window.Buttons.Add(new ToolButton
+                {
+                    Label = $"BUY ${target.Price}",
+                    Off = target.Price > terminal.groupCredits,
+                    Click = () =>
+                    {
+                        Window.Show(new Window { Title = name.ToUpperInvariant(), Text = Commands.Act(terminal, target.Confirm, 1) });
+                        Navigator.Rebuild(terminal);
+                    }
+                });
+            }
+
+            window.Buttons.Add(new ToolButton { Label = "OK", Click = Window.Close });
+            Window.Show(window);
+        }
+
+        private static void AskToBuy(Terminal terminal, Facts facts)
+        {
+            var window = new Window
+            {
+                Title = "BUY " + facts.Name.ToUpperInvariant() + "?",
+                Text = $"{facts.Name}<pos=65%>{facts.Price}\nCredits after<pos=65%>${terminal.groupCredits - PriceOf(facts)}"
+            };
+            window.Buttons.Add(new ToolButton { Label = "BUY", Click = () => Buy(terminal, facts) });
+            window.Buttons.Add(new ToolButton { Label = "CANCEL", Click = Window.Close });
+            Window.Show(window);
+        }
+
+        private static int PriceOf(Facts facts)
+        {
+            var digits = facts.Price.Substring(facts.Price.LastIndexOf('$') + 1);
+            return int.TryParse(digits, out var price) ? price : 0;
+        }
+
+        private static void Buy(Terminal terminal, Facts facts)
+        {
+            if (facts.Target.Confirm == null)
+            {
+                Commands.Submit(terminal, facts.Target.Command);
+                return;
+            }
+
+            var answer = Commands.Act(terminal, facts.Target.Confirm, 1);
+            Navigator.Rebuild(terminal);
+            terminal.StartCoroutine(RebuildLater(terminal));
+            Window.Show(new Window { Title = "ORDER: " + facts.Name.ToUpperInvariant(), Text = answer });
+        }
+
+        private static System.Collections.IEnumerator RebuildLater(Terminal terminal)
+        {
+            foreach (var wait in new[] { 0.3f, 1f })
+            {
+                yield return new WaitForSecondsRealtime(wait);
+                if (Navigator.Current != null && Navigator.Current.Page != null && Navigator.Current.Page.Title == "STORE")
+                {
+                    Navigator.Rebuild(terminal);
+                }
+            }
+        }
+
+        private static void CartWindow(Terminal terminal)
+        {
+            var items = terminal.buyableItemsList;
+            var total = Cart.Total(terminal);
+            var text = new System.Text.StringBuilder();
+
+            text.Append("Items<pos=75%>").Append(Cart.Count + terminal.numberOfItemsInDropship).Append(" / ").Append(DropshipLimit.Value);
+            text.Append("\nTotal<pos=75%>$").Append(total);
+            if (Cart.Count == 0)
+            {
+                text.Append("\n\nThe cart is empty.");
+            }
+
+            var window = new Window { Title = "CART", Text = text.ToString(), GroupsInLine = true };
+
+            Action again = () =>
+            {
+                Navigator.Rebuild(terminal);
+                CartWindow(terminal);
+            };
+
+            foreach (var line in Cart.Lines)
+            {
+                var item = line.Key;
+                var row = window.Group($"{items[item].itemName}<pos=60%>${Cart.PriceOf(terminal, item) * line.Value}");
+                row.Add(new ToolButton
+                {
+                    Label = "<",
+                    Narrow = true,
+                    Click = () =>
+                    {
+                        Cart.Remove(item);
+                        again();
+                    }
+                });
+                row.Add(new ToolButton { Label = line.Value.ToString(), Bare = true });
+                row.Add(new ToolButton
+                {
+                    Label = ">",
+                    Narrow = true,
+                    Off = !Cart.CanAdd(terminal, item),
+                    Click = () =>
+                    {
+                        Cart.Add(terminal, item);
+                        again();
+                    }
+                });
+            }
+
+            if (Cart.Count > 0)
+            {
+                window.Buttons.Add(new ToolButton
+                {
+                    Label = "ORDER",
+                    Off = total > terminal.groupCredits,
+                    Click = () =>
+                    {
+                        Window.Close();
+                        CartPage.Order(terminal);
+                    }
+                });
+                window.Buttons.Add(new ToolButton
+                {
+                    Label = "EMPTY",
+                    Click = () =>
+                    {
+                        Cart.Clear();
+                        again();
+                    }
+                });
+                window.RightButtons.Add(new ToolButton { Label = "SAVE CART", Click = () => SaveWindow(terminal) });
+            }
+
+            Window.Show(window);
+        }
+
+        private static void SaveWindow(Terminal terminal)
+        {
+            Commands.Type(terminal, "");
+            var window = new Window { Title = "SAVE CART", Text = "Type a name for this cart, then Enter. It shows under SAVED CARTS in the store.", Longest = 24 };
+            window.Send = name =>
+            {
+                name = (name ?? "").Trim();
+                if (name.Length == 0)
+                {
+                    return;
+                }
+
+                Commands.Type(terminal, "");
+                SavedCarts.Save(terminal, name);
+                Navigator.Rebuild(terminal);
+                Window.Show(new Window { Title = "SAVE CART", Text = $"Saved as \"{name}\"." });
+            };
+            window.Buttons.Add(new ToolButton { Label = "SAVE", Click = () => window.Send(Commands.Typed(terminal)) });
+            window.Buttons.Add(new ToolButton { Label = "CANCEL", Click = Window.Close });
+            Window.Show(window);
+        }
+
+        private const string SavedTab = "SAVED CARTS";
+        private static readonly Dictionary<MenuEntry, SavedCarts.Saved> SavedRows = new Dictionary<MenuEntry, SavedCarts.Saved>();
+
+        private static void AddSavedRows(Terminal terminal, MenuPage page)
+        {
+            SavedRows.Clear();
+            page.Columns.Add(new Column { Header = "NAME" });
+            page.Columns.Add(new Column { Header = "ITEMS", Chars = 5, AlignRight = true });
+            page.Columns.Add(new Column { Header = "PRICE", Chars = 6, AlignRight = true });
+
+            foreach (var saved in SavedCarts.All)
+            {
+                var row = new MenuEntry
+                {
+                    Label = saved.Name,
+                    Click = () => { },
+                    Cells = new[] { saved.Count.ToString(), "$" + SavedCarts.Total(terminal, saved) }
+                };
+                SavedRows[row] = saved;
+                page.Entries.Add(row);
+            }
+        }
+
+        private static Detail SavedDetail(Terminal terminal, SavedCarts.Saved saved)
+        {
+            var detail = new Detail
+            {
+                Title = saved.Name,
+                Text = string.Join("\n", saved.Lines.Select(line => $"{line.Value}x {line.Key}"))
+            };
+            detail.Facts.Add(new Fact { Label = "Items", Value = saved.Count.ToString() });
+            detail.Facts.Add(new Fact { Label = "Price today", Value = "$" + SavedCarts.Total(terminal, saved) });
+
+            detail.Buttons.Add(new ToolButton
+            {
+                Label = "LOAD",
+                Click = () =>
+                {
+                    Cart.Clear();
+                    Loaded(terminal, saved);
+                }
+            });
+            detail.Buttons.Add(new ToolButton { Label = "ADD", Click = () => Loaded(terminal, saved) });
+            detail.Buttons.Add(new ToolButton
+            {
+                Label = "DELETE",
+                Click = () =>
+                {
+                    var window = new Window { Title = "DELETE CART", Text = $"Delete the saved cart \"{saved.Name}\"?" };
+                    window.Buttons.Add(new ToolButton
+                    {
+                        Label = "DELETE",
+                        Click = () =>
+                        {
+                            SavedCarts.Delete(saved);
+                            Window.Close();
+                            Navigator.Rebuild(terminal);
+                        }
+                    });
+                    window.Buttons.Add(new ToolButton { Label = "CANCEL", Click = Window.Close });
+                    Window.Show(window);
+                }
+            });
+            return detail;
+        }
+
+        private static void Loaded(Terminal terminal, SavedCarts.Saved saved)
+        {
+            var left = SavedCarts.Load(terminal, saved);
+            Navigator.Rebuild(terminal);
+            if (left > 0)
+            {
+                Window.Show(new Window
+                {
+                    Title = "CART",
+                    Text = $"{left} of the items did not go in: the store does not sell them now, the dropship is full, or the credits do not reach."
+                });
+            }
+            else
+            {
+                CartWindow(terminal);
+            }
+        }
+
+        private static Detail CartPanel(Terminal terminal)
+        {
+            var items = terminal.buyableItemsList;
+            var panel = new Detail { Title = "CART" };
+
+            if (Cart.Count == 0)
+            {
+                panel.Text = "Empty. ADD TO CART puts the picked item here.";
+                return panel;
+            }
+
+            var lines = Cart.Lines.ToList();
+            panel.Text = string.Join("\n", lines.Take(3).Select(line => $"{line.Value}x {items[line.Key].itemName}"))
+                         + (lines.Count > 3 ? $"\n+{lines.Count - 3} more" : "");
+
+            var total = Cart.Total(terminal);
+            panel.Facts.Add(new Fact { Label = "Items", Value = $"{Cart.Count + terminal.numberOfItemsInDropship} / {DropshipLimit.Value}" });
+            panel.Facts.Add(new Fact { Label = "Total", Value = "$" + total });
+            panel.Buttons.Add(new ToolButton { Label = "ORDER", Primary = true, Off = total > terminal.groupCredits, Click = () => CartPage.Order(terminal) });
+            panel.Buttons.Add(new ToolButton { Label = "VIEW ALL", Click = () => CartWindow(terminal) });
+            panel.Buttons.Add(new ToolButton
+            {
+                Label = "EMPTY",
+                Click = () =>
+                {
+                    Cart.Clear();
+                    Navigator.Rebuild(terminal);
+                }
+            });
+            return panel;
         }
 
         private static int OnSale(Terminal terminal)
@@ -100,144 +536,8 @@ namespace ClickableTerminal
             return count;
         }
 
-        // One part of the store. Items go to the cart on a click, everything else is bought on the spot.
-        private static MenuPage GroupPage(Terminal terminal, string group)
-        {
-            var hidden = Hidden();
-            var items = group == Items;
-            var sections = Sections(terminal).Where(section => section.Group == group).ToList();
-
-            var page = new MenuPage
-            {
-                Title = group,
-                Hint = items ? "Click: +1 to cart  Right: info" : "Right click: info",
-                Dense = true,
-                SortBy = column =>
-                {
-                    State.SortBy(column);
-                    Navigator.Rebuild(terminal);
-                }
-            };
-
-            page.Columns.Add(new Column { Header = State.HeaderFor("NAME", 0) });
-            if (items)
-            {
-                // The amount in the cart sits between the two buttons that change it.
-                page.Columns.Add(new Column { Header = State.HeaderFor("OWNED", 1), Chars = 5 });
-                page.Columns.Add(new Column { Header = "", Chars = 3, AlignRight = true });
-                page.Columns.Add(new Column { Header = State.HeaderFor("CART", 3), Chars = 4, AlignCenter = true });
-                page.Columns.Add(new Column { Header = "", Chars = 3 });
-                page.Columns.Add(new Column { Header = State.HeaderFor("PRICE", 5), Chars = 13, AlignRight = true });
-            }
-            else
-            {
-                page.Columns.Add(new Column { Header = State.HeaderFor("PRICE", 1), Chars = 13, AlignRight = true });
-            }
-
-            page.Tools.Add(State.ToolFor("CAN AFFORD", Affordable, () => Navigator.Rebuild(terminal)));
-
-            if (items)
-            {
-                if (sections.Count > 1)
-                {
-                    page.Tools.Add(new ToolButton
-                    {
-                        Label = "CATEGORIES",
-                        Active = sections.Any(section => hidden.Contains(section.Title)),
-                        Click = () => Navigator.Open(() => CategoriesPage(terminal, Items))
-                    });
-                }
-
-                Cart.Tidy(terminal);
-                page.Tools.Add(new ToolButton
-                {
-                    Label = Cart.Count == 0 ? "CART" : $"CART: {Cart.Count}  ${Cart.Total(terminal)}",
-                    Active = Cart.Count > 0,
-                    Click = () => Navigator.Open(() => CartPage.Build(terminal))
-                });
-            }
-
-            foreach (var section in sections)
-            {
-                if (hidden.Contains(section.Title) || section.Rows.Count == 0)
-                {
-                    continue;
-                }
-
-                foreach (var row in section.Rows)
-                {
-                    var owned = row.Cells[0];
-                    var price = row.Cells[1];
-
-                    if (!items)
-                    {
-                        row.Cells = new[] { price };
-                        row.Keys = new[] { row.Keys[0], row.Keys[2] };
-                        continue;
-                    }
-
-                    var item = row.Id;
-                    var picked = Cart.Of(item);
-                    Action more = () =>
-                    {
-                        Cart.Add(terminal, item);
-                        Navigator.Rebuild(terminal);
-                    };
-
-                    row.Cells = new[]
-                    {
-                        owned,
-                        picked > 0 ? "[-]" : "",
-                        picked > 0 ? picked.ToString() : "",
-                        Cart.CanAdd(terminal, item) ? "[+]" : "",
-                        price
-                    };
-                    row.Keys = new[] { row.Keys[0], row.Keys[1], picked, picked, picked, row.Keys[2] };
-                    row.Click = more;
-                    row.CellClicks = new Action[]
-                    {
-                        null,
-                        () =>
-                        {
-                            Cart.Remove(item);
-                            Navigator.Rebuild(terminal);
-                        },
-                        null,
-                        more,
-                        null
-                    };
-                }
-
-                // A part with one section needs no bar over it.
-                if (sections.Count > 1)
-                {
-                    var title = section.Title;
-                    var folded = State.Has(Folded + title);
-                    page.Entries.Add(new MenuEntry
-                    {
-                        Label = $"{(folded ? "+" : "-")} {title}  ({section.Rows.Count})",
-                        IsHeader = true,
-                        Click = () =>
-                        {
-                            State.Toggle(Folded + title);
-                            Navigator.Rebuild(terminal);
-                        }
-                    });
-
-                    if (folded)
-                    {
-                        continue;
-                    }
-                }
-
-                page.Entries.AddRange(Family(State.Sorted(section.Rows)));
-            }
-
-            return page;
-        }
-
-        // Rows named "Family - Name" that share the family, in the game's order, become one plain line with the family
-        // and the rows under it with only their own names. Sorted by a column, every row keeps its full name.
+        // Rows named "Family - Name" in the game's order become a family line with the members under it. Sorted by a
+        // column, every row keeps its full name.
         private static List<MenuEntry> Family(List<MenuEntry> rows)
         {
             if (State.SortColumn >= 0)
@@ -260,9 +560,15 @@ namespace ClickableTerminal
 
             var result = new List<MenuEntry>();
             var placed = new HashSet<string>();
+            var listed = new HashSet<MenuEntry>();
 
             foreach (var row in rows)
             {
+                if (listed.Contains(row))
+                {
+                    continue;
+                }
+
                 var head = Head(row);
                 if (head == null || !families.Contains(head))
                 {
@@ -275,170 +581,16 @@ namespace ClickableTerminal
                     continue;
                 }
 
-                result.Add(new MenuEntry { Label = head, Dim = true });
-                foreach (var member in rows.Where(other => Head(other) == head))
+                result.Add(new MenuEntry { Label = head, IsHeader = true });
+                foreach (var member in rows.Where(other => Head(other) == head).ToList())
                 {
-                    member.Label = "  " + member.Label.Substring(head.Length + 3);
+                    listed.Add(member);
+                    member.Label = member.Label.Substring(head.Length + 3);
                     result.Add(member);
                 }
             }
 
             return result;
-        }
-
-        // Everything on one page, the way it was before the store had parts.
-        private static MenuPage Single(Terminal terminal)
-        {
-            var sections = Sections(terminal);
-            var hidden = Hidden();
-
-            var page = new MenuPage
-            {
-                Title = "STORE",
-                Hint = Settings.ShowUtilitySlotIcon.Value ? "Right: info  Bag: utility slot" : "Right click: info",
-                Dense = true,
-                SortBy = column =>
-                {
-                    State.SortBy(column);
-                    Navigator.Rebuild(terminal);
-                }
-            };
-
-            page.Columns.Add(new Column { Header = State.HeaderFor("NAME", 0) });
-            page.Columns.Add(new Column { Header = State.HeaderFor("OWNED", 1), Chars = 7 });
-            page.Columns.Add(new Column { Header = State.HeaderFor("PRICE", 2), Chars = 13, AlignRight = true });
-
-            // One switch per kind of thing, for the ones the store has at all.
-            foreach (var group in Groups)
-            {
-                if (sections.All(section => section.Group != group.Key))
-                {
-                    continue;
-                }
-
-                var name = group.Key;
-                page.Tools.Add(new ToolButton
-                {
-                    Label = group.Value,
-                    Off = hidden.Contains(name),
-                    Click = () =>
-                    {
-                        Flip(name);
-                        Navigator.Rebuild(terminal);
-                    }
-                });
-            }
-
-            // The fine print: what the crew can afford, and every category on its own.
-            page.Tools.Add(new ToolButton
-            {
-                Label = "...",
-                Active = State.Has(Affordable) || sections.Any(section => section.Title != section.Group && hidden.Contains(section.Title)),
-                Click = () => Navigator.Open(() => CategoriesPage(terminal, null))
-            });
-
-            string last = null;
-
-            foreach (var section in sections)
-            {
-                if (hidden.Contains(section.Group) || hidden.Contains(section.Title) || section.Rows.Count == 0)
-                {
-                    continue;
-                }
-
-                // An empty line where one kind of thing ends and the next begins.
-                if (last != null && last != section.Group)
-                {
-                    page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
-                }
-
-                last = section.Group;
-
-                // A click on the bar folds the section away, so a long store can be read as a list of its parts.
-                var title = section.Title;
-                var folded = State.Has(Folded + title);
-                page.Entries.Add(new MenuEntry
-                {
-                    Label = $"{(folded ? "+" : "-")} {title}  ({section.Rows.Count})",
-                    IsHeader = true,
-                    Click = () =>
-                    {
-                        State.Toggle(Folded + title);
-                        Navigator.Rebuild(terminal);
-                    }
-                });
-
-                if (!folded)
-                {
-                    page.Entries.AddRange(State.Sorted(section.Rows));
-                }
-            }
-
-            return sections.Count > 0 || State.Has(Affordable) ? page : null;
-        }
-
-        // A tick box for every part of the store. What is switched off here stays off: it is written to the config.
-        private static MenuPage CategoriesPage(Terminal terminal, string only)
-        {
-            var page = new MenuPage { Title = only == null ? "STORE FILTERS" : "CATEGORIES", Hint = "BACK shows the store" };
-            var hidden = Hidden();
-
-            page.Entries.Add(new MenuEntry
-            {
-                Label = (State.Has(Affordable) ? "[x]" : "[ ]") + " Only what the crew can afford",
-                Click = () =>
-                {
-                    State.Toggle(Affordable);
-                    Navigator.Rebuild(terminal);
-                }
-            });
-            page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
-
-            if (hidden.Count > 0)
-            {
-                page.Entries.Add(new MenuEntry
-                {
-                    Label = "Show every category",
-                    Click = () =>
-                    {
-                        Settings.HiddenStoreCategories.Value = "";
-                        Navigator.Rebuild(terminal);
-                    }
-                });
-            }
-
-            // The filter above must not empty this list of the very categories it is there to switch.
-            var affordable = State.Has(Affordable);
-            if (affordable)
-            {
-                State.Toggle(Affordable);
-            }
-
-            var sections = Sections(terminal).Where(section => only == null || section.Group == only).ToList();
-
-            if (affordable)
-            {
-                State.Toggle(Affordable);
-            }
-
-            foreach (var section in sections)
-            {
-                // Switched off as a whole kind, a single category cannot be on.
-                var title = section.Title;
-                var wholeKindOff = title != section.Group && hidden.Contains(section.Group);
-                page.Entries.Add(new MenuEntry
-                {
-                    Label = $"{(hidden.Contains(title) || wholeKindOff ? "[ ]" : "[x]")} {title}  ({section.Rows.Count})",
-                    Dim = wholeKindOff,
-                    Click = () =>
-                    {
-                        Flip(wholeKindOff ? section.Group : title);
-                        Navigator.Rebuild(terminal);
-                    }
-                });
-            }
-
-            return page;
         }
 
         private static HashSet<string> Hidden()
@@ -447,22 +599,11 @@ namespace ClickableTerminal
                 Settings.HiddenStoreCategories.Value.Split(',').Select(name => name.Trim().ToUpperInvariant()).Where(name => name.Length > 0));
         }
 
-        private static void Flip(string name)
-        {
-            var hidden = Hidden();
-            if (!hidden.Remove(name))
-            {
-                hidden.Add(name);
-            }
-
-            Settings.HiddenStoreCategories.Value = string.Join(", ", hidden.OrderBy(entry => entry));
-        }
-
-        // Everything on sale, part by part, in the order it is listed.
         private static List<Section> Sections(Terminal terminal)
         {
             var catalog = Catalog.Read(terminal);
             var sections = new List<Section>();
+            About.Clear();
 
             AddItems(sections, terminal, catalog);
             AddVehicles(sections, terminal, catalog);
@@ -483,27 +624,31 @@ namespace ClickableTerminal
 
             for (var i = 0; i < items.Length; i++)
             {
-                if (items[i] == null || !catalog.Items.TryGetValue(i, out var target))
+                var item = items[i];
+                if (item == null || !catalog.Items.TryGetValue(i, out var target))
                 {
                     continue;
                 }
 
-                onShip.TryGetValue(items[i], out var owned);
-                var row = Row(terminal, catalog, target, items[i].itemName, items[i].creditsWorth, Sale(terminal, i), owned);
+                onShip.TryGetValue(item, out var owned);
+                var category = Settings.CategorizeItems.Value ? ItemCategories.Of(item) : Items;
+                var row = Row(terminal, catalog, target, item.itemName, item.creditsWorth, Sale(terminal, i), owned, category, item.itemIcon);
                 if (row == null)
                 {
                     continue;
                 }
 
                 row.Id = i;
+                About[row].Weight = Weight(item);
+                About[row].IsItem = true;
+                About[row].Item = i;
 
-                // The same test the game makes when it picks a slot for something picked up.
-                if (Settings.ShowUtilitySlotIcon.Value && !items[i].isScrap && !items[i].twoHanded && !items[i].disallowUtilitySlot)
+                // The same test the game makes when it picks a slot.
+                if (!item.isScrap && !item.twoHanded && !item.disallowUtilitySlot)
                 {
-                    row.Marker = Marker.Utility;
+                    About[row].Utility = true;
                 }
 
-                var category = Settings.CategorizeItems.Value ? ItemCategories.Of(items[i]) : Items;
                 if (!byCategory.TryGetValue(category, out var rows))
                 {
                     byCategory[category] = rows = new List<MenuEntry>();
@@ -521,6 +666,12 @@ namespace ClickableTerminal
             }
         }
 
+        private static string Weight(Item item)
+        {
+            var pounds = Mathf.RoundToInt(Mathf.Clamp(item.weight - 1f, 0f, 100f) * 105f);
+            return pounds + " lb";
+        }
+
         private static void AddVehicles(List<Section> sections, Terminal terminal, Catalog catalog)
         {
             var vehicles = terminal.buyableVehicles;
@@ -529,15 +680,16 @@ namespace ClickableTerminal
                 return;
             }
 
-            // The sales of the vehicles come after those of the items in the same array.
+            // The vehicles' sales come after the items' in the same array.
             var offset = terminal.buyableItemsList != null ? terminal.buyableItemsList.Length : 0;
             var rows = new List<MenuEntry>();
+            var owned = UnityEngine.Object.FindObjectsOfType<VehicleController>().Count(vehicle => vehicle != null && !vehicle.carDestroyed);
 
             for (var i = 0; i < vehicles.Length; i++)
             {
                 if (vehicles[i] != null && catalog.Vehicles.TryGetValue(i, out var target))
                 {
-                    var row = Row(terminal, catalog, target, vehicles[i].vehicleDisplayName, vehicles[i].creditsWorth, Sale(terminal, offset + i), 0);
+                    var row = Row(terminal, catalog, target, vehicles[i].vehicleDisplayName, vehicles[i].creditsWorth, Sale(terminal, offset + i), owned, "Vehicle", null);
                     if (row != null)
                     {
                         rows.Add(row);
@@ -573,7 +725,6 @@ namespace ClickableTerminal
                     continue;
                 }
 
-                // The decorations on offer change every quota, the upgrades are always there.
                 var node = unlockable.shopSelectionNode;
                 var rotating = node != null && terminal.ShipDecorSelection != null && terminal.ShipDecorSelection.Contains(node);
                 if (!unlockable.alwaysInStock && !rotating)
@@ -588,7 +739,21 @@ namespace ClickableTerminal
                     price = StoreRotationCompat.PriceAfter(price, discount);
                 }
 
-                var row = Row(terminal, catalog, pair.Value, unlockable.unlockableName, price, 100, 0);
+                var suit = unlockable.unlockableType == 0;
+                var kind = suit ? "Suit" : unlockable.alwaysInStock ? "Ship upgrade" : "Decoration";
+
+                // A broken modded decoration is left out, the rest of the store still shows.
+                MenuEntry row;
+                try
+                {
+                    row = Row(terminal, catalog, pair.Value, unlockable.unlockableName, price, 100, 0, kind, null);
+                }
+                catch (System.Exception e)
+                {
+                    Plugin.WarnOnce($"The store left out \"{unlockable.unlockableName}\", it could not be read: {e}");
+                    continue;
+                }
+
                 if (row == null)
                 {
                     continue;
@@ -596,12 +761,12 @@ namespace ClickableTerminal
 
                 if (discount > 0)
                 {
-                    row.Cells[1] = $"-{discount}% " + ("$" + price).PadLeft(6);
+                    row.Cells[1] = $"-{discount}% ${price}";
+                    About[row].Price = row.Cells[1];
                     row.Id = discount;
                 }
 
-                var section = unlockable.unlockableType == 0 ? suits : unlockable.alwaysInStock ? upgrades : decorations;
-                section.Add(row);
+                (suit ? suits : unlockable.alwaysInStock ? upgrades : decorations).Add(row);
             }
 
             foreach (var section in new[]
@@ -618,24 +783,40 @@ namespace ClickableTerminal
             }
         }
 
-        private static MenuEntry Row(Terminal terminal, Catalog catalog, Target target, string name, int fullPrice, int sale, int owned)
+        private static MenuEntry Row(Terminal terminal, Catalog catalog, Target target, string name, int fullPrice, int sale, int owned, string kind, Sprite picture)
         {
-            // Rounded the way the game does it when it takes the money.
+            // Rounded the way the game rounds when it takes the money.
             var price = (int)(fullPrice * (sale / 100f));
-            if (State.Has(Affordable) && price > terminal.groupCredits)
-            {
-                return null;
-            }
-
-            return new MenuEntry
+            var shownPrice = sale < 100 ? $"-{100 - sale}% ${price}" : "$" + price;
+            var row = new MenuEntry
             {
                 Label = name,
+                Sub = catalog.About(target, 1, 70),
+                Picture = picture,
                 Command = target.Command,
-                AltCommand = catalog.InfoFor(target),
+                AltClick = Info(terminal, name, catalog.InfoNode(target)),
                 Dim = price > terminal.groupCredits,
-                Cells = new[] { owned > 0 ? "x" + owned : "", sale < 100 ? $"-{100 - sale}% " + ("$" + price).PadLeft(6) : "$" + price },
+                Cells = new[] { owned > 0 ? owned.ToString() : "", shownPrice },
                 Keys = new IComparable[] { name, owned, price }
             };
+
+            About[row] = new Facts
+            {
+                Picture = picture,
+                Name = name,
+                Text = catalog.About(target, 2, 160),
+                Kind = kind,
+                Price = shownPrice,
+                Owned = owned,
+                Target = target,
+                Info = catalog.InfoNode(target)
+            };
+            return row;
+        }
+
+        private static Action Info(Terminal terminal, string name, TerminalNode node)
+        {
+            return node != null ? () => Window.ShowPage(terminal, name.ToUpperInvariant(), node) : (Action)null;
         }
 
         private static int Sale(Terminal terminal, int index)

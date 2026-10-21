@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // The game answers a scan with one sentence. This lists the scrap behind that number.
     internal static class ScanPage
     {
-        // Worth most first, until the player sorts it another way.
         private static readonly PageState State = new PageState { SortColumn = 2, Descending = true };
 
         internal static MenuPage Build(Terminal terminal)
@@ -29,7 +28,7 @@ namespace ClickableTerminal
                     continue;
                 }
 
-                // The same split the game makes: in orbit everything counts, on a moon only what is still outside.
+                // The game's own split: in orbit everything counts, on a moon only what is still outside.
                 if (!inOrbit && (item.isInShipRoom || item.isInElevator))
                 {
                     continue;
@@ -42,6 +41,7 @@ namespace ClickableTerminal
                 rows.Add(new MenuEntry
                 {
                     Label = name,
+                    Picture = item.itemProperties.itemIcon,
                     Icons = hands,
                     Cells = new[] { "", "$" + item.scrapValue },
                     Keys = new IComparable[] { name, hands, item.scrapValue }
@@ -51,6 +51,9 @@ namespace ClickableTerminal
             var page = new MenuPage
             {
                 Title = "SCAN",
+                Scale = 0.85f,
+                ScaleMin = 0.7f,
+                ScaleMax = 1f,
                 IconColumn = 1,
                 SortBy = column =>
                 {
@@ -69,7 +72,17 @@ namespace ClickableTerminal
             page.Columns.Add(new Column { Header = State.HeaderFor("HANDS", 1), Chars = 7 });
             page.Columns.Add(new Column { Header = State.HeaderFor("VALUE", 2), Chars = 8, AlignRight = true });
 
-            page.Summary = $"{(inOrbit ? "In the ship" : "Outside the ship")}: {rows.Count} objects   Total: ${total}";
+            page.Subtitle = inOrbit ? "Everything in the ship" : "Everything still outside the ship";
+            var best = rows.OrderByDescending(row => (int)row.Keys[2]).First();
+            page.Extra = () =>
+            {
+                var panel = new Detail { Title = "TOTAL" };
+                panel.Facts.Add(new Fact { Label = "Value", Value = "$" + total });
+                panel.Facts.Add(new Fact { Label = "Objects", Value = rows.Count.ToString() });
+                panel.Facts.Add(new Fact { Label = "Average", Value = "$" + Mathf.RoundToInt(total / (float)rows.Count) });
+                panel.Facts.Add(new Fact { Label = "Most valuable", Value = $"{best.Label} {best.Cells[1]}" });
+                return panel;
+            };
             page.Entries.AddRange(State.Sorted(rows));
             return page;
         }

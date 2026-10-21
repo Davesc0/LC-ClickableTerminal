@@ -17,7 +17,7 @@ namespace ClickableTerminal
         {
             Settings.Init(Config);
 
-            // A category edited while the game runs has to take effect on the next visit to the store.
+            // A category edited while the game runs takes effect on the next store visit.
             Config.SettingChanged += (sender, args) => ItemCategories.ClearCache();
 
             mlg.LogInfo($"Plugin {modName} is loaded!");
@@ -26,12 +26,19 @@ namespace ClickableTerminal
 
         private static readonly System.Collections.Generic.HashSet<string> Warned = new System.Collections.Generic.HashSet<string>();
 
-        // For problems a page can run into every time it is drawn: said once, not on every draw.
         internal static void WarnOnce(string message)
         {
             if (Warned.Add(message))
             {
                 mlg.LogWarning(message);
+            }
+        }
+
+        internal static void Debug(string message)
+        {
+            if (Settings.DebugLog != null && Settings.DebugLog.Value)
+            {
+                mlg.LogInfo("[Debug] " + message);
             }
         }
     }

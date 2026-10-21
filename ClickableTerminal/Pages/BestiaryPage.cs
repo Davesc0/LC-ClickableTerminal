@@ -7,6 +7,7 @@ namespace ClickableTerminal
     internal static class BestiaryPage
     {
         private static readonly PageState State = new PageState();
+        private static readonly Dictionary<MenuEntry, TerminalNode> Files = new Dictionary<MenuEntry, TerminalNode>();
 
         internal static MenuPage Build(Terminal terminal)
         {
@@ -17,6 +18,7 @@ namespace ClickableTerminal
             }
 
             var catalog = Catalog.Read(terminal);
+            Files.Clear();
             var scanned = terminal.scannedEnemyIDs ?? new List<int>();
             var rows = new List<KeyValuePair<string, MenuEntry>>();
             var grouped = Settings.GroupCreaturesByAuthor.Value;
@@ -32,9 +34,15 @@ namespace ClickableTerminal
                 }
             }
 
+            var known = files.Count(file => file != null && catalog.Creatures.ContainsKey(file.creatureFileID));
             var page = new MenuPage
             {
                 Title = "BESTIARY",
+                Scale = 0.7f,
+                ScaleMin = 0.6f,
+                ScaleMax = 0.8f,
+                Subtitle = $"{scanned.Count(id => catalog.Creatures.ContainsKey(id))} of {known} creatures scanned",
+                DetailFor = entry => Files.TryGetValue(entry, out var file) ? Detail(file) : null,
                 SortBy = column =>
                 {
                     State.SortBy(column);
@@ -50,10 +58,9 @@ namespace ClickableTerminal
 
             page.Columns.Add(new Column { Header = State.HeaderFor("NAME", 0) });
             page.Columns.Add(new Column { Header = State.HeaderFor("HP", 1), Chars = 5 });
-            page.Columns.Add(new Column { Header = State.HeaderFor("POWER", 2), Chars = 8 });
+            page.Columns.Add(new Column { Header = State.HeaderFor("POWER", 2), Chars = 7 });
             page.Columns.Add(new Column { Header = State.HeaderFor("HABITAT", 3), Chars = 10 });
 
-            // The game's own first, the ones nobody could be found for last.
             var groups = rows
                 .GroupBy(row => row.Key)
                 .OrderBy(group => group.Key == Origins.Vanilla ? 0 : group.Key == Origins.Unknown ? 2 : 1)
@@ -80,7 +87,76 @@ namespace ClickableTerminal
             return page;
         }
 
-        // The game's own files that are not about a creature, so nothing in the game can vouch for them.
+        private static Detail Detail(TerminalNode file)
+        {
+            var detail = new Detail
+            {
+                Texture = file.displayTexture,
+                Title = file.creatureName,
+                Text = Catalog.Excerpt(file.displayText, 2, 170),
+                Foot = "SELECT: OPEN FILE"
+            };
+
+            foreach (var figure in Figures(file))
+            {
+                detail.Facts.Add(new Fact { Label = figure.Key, Value = figure.Value });
+            }
+
+            return detail;
+        }
+
+        private static List<KeyValuePair<string, string>> Figures(TerminalNode file)
+        {
+            var figures = new List<KeyValuePair<string, string>>();
+            var enemy = CreatureIndex.Find(file);
+
+            var danger = Catalog.Field(file.displayText, "danger level");
+            if (danger != null)
+            {
+                figures.Add(new KeyValuePair<string, string>("Danger", danger));
+            }
+
+            if (enemy != null)
+            {
+                var health = CreatureIndex.HealthOf(enemy);
+                figures.Add(new KeyValuePair<string, string>("Health", health?.ToString() ?? "Can't be killed"));
+                figures.Add(new KeyValuePair<string, string>("Power", enemy.PowerLevel.ToString("0.#")));
+                figures.Add(new KeyValuePair<string, string>("Max at once", enemy.MaxCount.ToString()));
+                figures.Add(new KeyValuePair<string, string>("Stunnable", enemy.canBeStunned ? "Yes" : "No"));
+                figures.Add(new KeyValuePair<string, string>("Habitat", enemy.isDaytimeEnemy ? "Daytime" : enemy.isOutsideEnemy ? "Surface" : "Interior"));
+            }
+
+            return figures;
+        }
+
+        // Opening it counts as reading it, like the game's own page.
+        private static void FileWindow(Terminal terminal, TerminalNode file)
+        {
+            var side = new System.Text.StringBuilder();
+
+            // The danger is already in the file's text, often as a whole sentence.
+            foreach (var figure in Figures(file).Where(figure => figure.Key != "Danger"))
+            {
+                side.Append("<alpha=#99>").Append(figure.Key.ToUpperInvariant()).Append("<alpha=#FF><pos=55%>").Append(figure.Value).Append('\n');
+            }
+
+            var picture = file.displayVideo != null ? MoonPicture.For(file.displayVideo) : file.displayTexture;
+            Window.Show(new Window
+            {
+                Title = (file.creatureName ?? "").ToUpperInvariant(),
+                Texture = picture,
+                NoPicture = picture == null,
+                Side = side.ToString().TrimEnd(),
+                Text = Window.Tidy(Commands.PageText(terminal, file), file.creatureName)
+            });
+
+            if (terminal.newlyScannedEnemyIDs != null && terminal.newlyScannedEnemyIDs.Remove(file.creatureFileID))
+            {
+                Navigator.Rebuild(terminal);
+            }
+        }
+
+        // Game files that are not about a creature, so nothing in the game can vouch for them.
         private static readonly HashSet<string> VanillaPlants = new HashSet<string> { "vain shrouds", "vain shroud" };
 
         private static string AuthorOf(TerminalNode file, Dictionary<EnemyType, string> credits)
@@ -102,15 +178,18 @@ namespace ClickableTerminal
 
             var row = new MenuEntry
             {
-                Label = isNew ? name + "  (NEW)" : name,
+                Label = name,
+                Sub = isNew ? "NEW" : null,
                 Command = target.Command,
+                Click = () => FileWindow(terminal, file),
                 Cells = new[] { "", "", "" },
                 Keys = new IComparable[] { name, int.MaxValue, float.MaxValue, "" }
             };
 
+            Files[row] = file;
+
             if (enemy != null)
             {
-                // Unkillable creatures sort after everything that has health.
                 var health = CreatureIndex.HealthOf(enemy);
                 var habitat = enemy.isDaytimeEnemy ? "Daytime" : enemy.isOutsideEnemy ? "Surface" : "Interior";
 

@@ -27,7 +27,6 @@ namespace ClickableTerminal
             "       XX   "
         };
 
-        // An open hand, for "this takes one hand" and "this takes two".
         private static readonly string[] HandRows =
         {
             "   o o   ",
@@ -43,7 +42,6 @@ namespace ClickableTerminal
             "  ooooo  "
         };
 
-        // A map pin: where the ship is now.
         private static readonly string[] PinRows =
         {
             "  ooooo  ",
@@ -74,29 +72,6 @@ namespace ClickableTerminal
             "ooooooooo"
         };
 
-        // A pouch: the thing fits the utility slot.
-        private static readonly string[] PouchRows =
-        {
-            "   ooo   ",
-            "  o   o  ",
-            "  o   o  ",
-            "ooooooooo",
-            "ooooooooo",
-            "ooo   ooo",
-            "ooo   ooo",
-            "ooooooooo",
-            "ooooooooo",
-            "ooooooooo",
-            " ooooooo "
-        };
-
-        private static Texture2D pouch;
-
-        internal static Texture2D Pouch()
-        {
-            return pouch != null ? pouch : pouch = Draw(PouchRows);
-        }
-
         private static Texture2D arrow;
         private static Texture2D hand;
         private static Texture2D pin;
@@ -124,16 +99,15 @@ namespace ClickableTerminal
 
         private static Texture2D Draw(string[] rows)
         {
-            // Each drawn pixel becomes a block of 8x8 with an empty rim around the picture, and the texture is
-            // sampled smoothly. Drawn one to one with hard sampling, the icons lost or grew a pixel
-            // depending on where exactly they landed on the screen.
+            // Each pixel becomes an 8x8 block with an empty rim, sampled smoothly. Drawn one to one, the icons lost or
+            // gained a pixel depending on where they landed.
             const int scale = 8;
             var columns = rows[0].Length;
             var lines = rows.Length;
             var width = (columns + 2) * scale;
             var height = (lines + 2) * scale;
 
-            // The empty part carries the colour of what it borders, so the edges do not get a dark or a light fringe.
+            // The empty part takes the colour of what it borders, so the edges get no dark or light fringe.
             var outlined = System.Array.Exists(rows, row => row.IndexOf('X') >= 0);
             var empty = outlined ? new Color(0f, 0f, 0f, 0f) : new Color(1f, 1f, 1f, 0f);
 

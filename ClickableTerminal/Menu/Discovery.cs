@@ -2,7 +2,6 @@ using System.Collections.Generic;
 
 namespace ClickableTerminal
 {
-    // Commands added by hand: by another mod through our API, and by the player in the config.
     internal static class Discovery
     {
         internal static List<MenuEntry> Unlisted(Terminal terminal, HashSet<string> known)

@@ -3,9 +3,8 @@ using HarmonyLib;
 
 namespace ClickableTerminal
 {
-    // BraBru's Terminal Scroll Patch looks the terminal up with FindObjectOfType on every turn of the mouse wheel,
-    // in the terminal and out of it, because the field it expects is not in this version of the game.
-    // That search walks the whole scene and costs a visible hitch each time. Here it gets the terminal handed to it.
+    // BraBru's Terminal Scroll Patch calls FindObjectOfType on every wheel turn, because the field it expects is gone in
+    // this game version. That is a visible hitch each time, so it gets the terminal handed to it.
     internal static class ScrollPatchFix
     {
         private static bool tried;
@@ -24,7 +23,7 @@ namespace ClickableTerminal
 
             try
             {
-                var patch = AccessTools.TypeByName("TerminalRelativeScroll.TerminalScrollPatch");
+                var patch = Reflect.Find("TerminalRelativeScroll.TerminalScrollPatch");
                 var lookup = patch != null ? AccessTools.Method(patch, "GetTerminal") : null;
                 if (lookup != null)
                 {

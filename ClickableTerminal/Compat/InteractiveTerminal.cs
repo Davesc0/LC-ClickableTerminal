@@ -9,10 +9,7 @@ using UnityEngine.InputSystem.LowLevel;
 
 namespace ClickableTerminal
 {
-    // WhiteSpike's Interactive Terminal API, read by reflection so it stays optional.
-    // Lategame Upgrades and others draw their keyboard driven screens with it: a list of elements with a cursor on one
-    // of them, W and S to move, Enter to pick, A and D for pages. Everything here goes through the API's own methods,
-    // so a click does exactly what the key would have done.
+    // Read by reflection, so the Interactive Terminal API stays optional.
     internal static class InteractiveTerminal
     {
         private static bool looked;
@@ -25,12 +22,10 @@ namespace ClickableTerminal
         private static int releaseIn;
         private static int pressedAt = -100;
 
-        // True for a few frames around a key press of ours, so it is not mistaken for the player typing.
+        // So our own key press is not mistaken for the player typing.
         internal static bool PressingKey => Time.frameCount - pressedAt < 6;
 
-        // What the exit key would do right now. The applications hang their own handlers on the key and swap them
-        // from screen to screen (step back from a question, close a sub menu, leave), so those handlers are run
-        // as they stand, exactly as the key would run them.
+        // Apps swap their exit handlers from screen to screen, so they are run as they stand, like the key would.
         internal static bool RunExitHandlers()
         {
             Find();
@@ -71,9 +66,7 @@ namespace ClickableTerminal
             }
         }
 
-        // The applications decide for themselves what their exit key does on each screen: step back from a
-        // question, close a sub menu, or leave. There is no telling from outside which it is, so the key itself
-        // is pressed for them, whichever key the player has bound to it.
+        // There is no telling from outside what the exit key does on this screen, so the key itself is pressed.
         internal static bool PressExitKey()
         {
             Find();
@@ -100,7 +93,6 @@ namespace ClickableTerminal
             }
         }
 
-        // Lets go of the key again a moment later.
         internal static void Tick()
         {
             if (held != null && --releaseIn <= 0)
@@ -131,9 +123,7 @@ namespace ClickableTerminal
             return Manager() != null;
         }
 
-        // The command an application is registered under, spelled the way the API wants it typed.
-        // It compares letter for letter, so "extend deadline" does not open what was registered as "Extend Deadline",
-        // and the game's own parser then takes the words for something else entirely.
+        // The API compares letter for letter, so "extend deadline" would not open "Extend Deadline".
         internal static string Registered(string command)
         {
             foreach (var key in Commands())
@@ -170,14 +160,12 @@ namespace ClickableTerminal
             return commands;
         }
 
-        // The application on screen, or null.
         internal static object Application()
         {
             var manager = Manager();
             return manager != null && application != null ? application.GetValue(manager) : null;
         }
 
-        // The list the cursor is in right now. It changes as the application moves between its screens.
         internal static object Menu(object app)
         {
             return app != null ? Traverse.Create(app).Field("currentCursorMenu").GetValue() : null;
@@ -188,8 +176,7 @@ namespace ClickableTerminal
             return menu != null ? Traverse.Create(menu).Field("elements").GetValue() as Array : null;
         }
 
-        // What the entry prints for itself. Applications often make their own kind of entry that has no name at all
-        // and writes a whole row (the upgrade, its levels, its price), so the printed text is asked for first.
+        // Many apps make entries with no name that print a whole row, so the printed text is asked for first.
         internal static string TextOf(object element)
         {
             try
@@ -207,7 +194,6 @@ namespace ClickableTerminal
             return Traverse.Create(element).Property("Name").GetValue() as string;
         }
 
-        // Greyed out entries can still be stood on when the application says so.
         internal static bool CanSelect(object element)
         {
             if (element == null)
@@ -225,13 +211,11 @@ namespace ClickableTerminal
             Traverse.Create(menu).Field("cursorIndex").SetValue(index);
         }
 
-        // What Enter does.
         internal static void Submit(object app)
         {
             Call(app, "Submit");
         }
 
-        // True on applications that have pages and are showing one of them, not a screen that came up over it.
         internal static bool HasPages(object app)
         {
             if (app == null)
@@ -250,13 +234,11 @@ namespace ClickableTerminal
             return index >= 0 && index < screens.Length && ReferenceEquals(shown, screens.GetValue(index));
         }
 
-        // What A and D do.
         internal static bool Page(object app, bool forward)
         {
             return HasPages(app) && Call(app, forward ? "ChangeScreenForward" : "ChangeScreenBackward");
         }
 
-        // The amount on entries that have one (how many to buy, how much to convert).
         internal static bool HasCounter(object element)
         {
             return element != null && element.GetType().GetMethod("IncrementCounter") != null
@@ -268,7 +250,6 @@ namespace ClickableTerminal
             Call(element, up ? "IncrementCounter" : "DecrementCounter");
         }
 
-        // Closes the application outright, whatever screen it is on.
         internal static void Exit(object app)
         {
             Call(app, "OnScreenExit", default(InputAction.CallbackContext));
@@ -317,7 +298,7 @@ namespace ClickableTerminal
             }
 
             looked = true;
-            var manager = AccessTools.TypeByName("InteractiveTerminalAPI.UI.InteractiveTerminalManager");
+            var manager = Reflect.Find("InteractiveTerminalAPI.UI.InteractiveTerminalManager");
             if (manager != null)
             {
                 instance = AccessTools.Field(manager, "Instance");
@@ -325,7 +306,7 @@ namespace ClickableTerminal
                 application = AccessTools.Field(manager, "mainApplication");
             }
 
-            var keys = AccessTools.TypeByName("InteractiveTerminalAPI.Input.Keybinds");
+            var keys = Reflect.Find("InteractiveTerminalAPI.Input.Keybinds");
             if (keys != null)
             {
                 exitAction = AccessTools.Field(keys, "cursorExitAction");

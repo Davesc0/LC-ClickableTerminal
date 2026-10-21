@@ -5,8 +5,6 @@ using BepInEx.Bootstrap;
 
 namespace ClickableTerminal
 {
-    // What we know about commands beyond what the terminal prints: which ones to leave out,
-    // how to describe the ones the game never explains, and which belong together under one mod.
     internal static class KnownCommands
     {
         internal class Group
@@ -15,21 +13,18 @@ namespace ClickableTerminal
             internal string Title;
             internal string Description;
 
-            // Every spelling the mod answers to, so none of them turns up loose on another page.
             internal string[] Claims;
             internal MenuEntry[] Entries;
 
-            // Entries whose command only exists when the mod has registered it (its own config can turn features off).
             internal string[] OnlyIfRegistered;
 
             // For commands that cannot be listed ahead, like one per interior.
             internal Func<string, bool> Owns;
 
-            // A page of its own instead of the list of entries.
             internal Func<MenuPage> Page;
         }
 
-        // Left out everywhere: a leftover cheat, and commands our own pages already cover.
+        // A leftover cheat, and commands our own pages already cover.
         private static readonly HashSet<string> Hidden = new HashSet<string>
         {
             "reset credits", "melanie",
@@ -37,15 +32,12 @@ namespace ClickableTerminal
             "simulate", "filter", "preview", "sort"
         };
 
-        // Vanilla commands the terminal itself never lists.
         private static readonly MenuEntry[] Unexplained =
         {
             new MenuEntry { Label = "LOGS", Command = "sigurd", Description = "Read the log entries the crew has found." },
             new MenuEntry { Label = "EJECT", Command = "eject", Description = "Fire the crew out of the airlock and start over." }
         };
 
-        // Mods that add a single command with a screen of its own: a name and a line about it, listed with the mods
-        // instead of among the commands nobody explains. Only shown when the command is really there.
         private static readonly MenuEntry[] Singles =
         {
             new MenuEntry { Label = "SHIP INVENTORY", Command = "ship", Description = "Put items away in the ship's inventory and take them out." },
@@ -54,16 +46,38 @@ namespace ClickableTerminal
             new MenuEntry { Label = "WEATHER PROBE", Command = "probe", Description = "Change the weather on a moon, for credits." }
         };
 
-        // The same for mods that do not go through the Interactive Terminal API: shown when the mod is installed.
         private static readonly KeyValuePair<string, MenuEntry>[] PluginSingles =
         {
-            new KeyValuePair<string, MenuEntry>("ExtraDaysToDeadline",
-                new MenuEntry { Label = "BUY EXTRA DAY", Command = "buyday", Description = "Ask the Company for one more day to reach the quota." }),
-            new KeyValuePair<string, MenuEntry>("abu.TooMuchScrap",
-                new MenuEntry { Label = "TOO MUCH SCRAP", Command = "merge", Description = "Merge nearby piles of small scrap (bones, body parts) into one, to cut lag. Host only." })
+            new KeyValuePair<string, MenuEntry>("ExtraDaysToDeadline", new MenuEntry
+            {
+                Label = "BUY EXTRA DAY",
+                Command = "buyday",
+                Description = "Ask the Company for one more day to reach the quota, for credits.",
+                Click = () => Answers.Run(TheTerminal(), "BUY EXTRA DAY", "buyday", true)
+            }),
+            new KeyValuePair<string, MenuEntry>("abu.TooMuchScrap", new MenuEntry
+            {
+                Label = "TOO MUCH SCRAP",
+                Command = "merge",
+                Description = "Merge nearby piles of small scrap (bones, body parts) into one, to cut lag. Host only.",
+                Click = () => Answers.AskFirst(TheTerminal(), "MERGE SCRAP",
+                    "Merge the small scrap lying close together in the ship into fewer pieces?\n\n<alpha=#99>Only the kinds set in the mod's config merge "
+                    + "(body parts and bones by default), only the host can, and by default only at the Company.", "MERGE", "merge")
+            }),
+            new KeyValuePair<string, MenuEntry>("BLUJAY.WeatherReroll", new MenuEntry
+            {
+                Label = "WEATHER REROLL",
+                Command = "reroll",
+                Description = "Roll the weather of every moon again, for credits. Each reroll that day costs more.",
+                Click = () => Answers.Run(TheTerminal(), "WEATHER REROLL", "reroll")
+            })
         };
 
-        // Other spellings the same mods answer to. One entry each is enough.
+        private static Terminal TheTerminal()
+        {
+            return UnityEngine.Object.FindObjectOfType<Terminal>();
+        }
+
         private static readonly HashSet<string> SingleAliases = new HashSet<string> { "merge scrap", "mergescrap", "scrapmerge", "weather" };
 
         internal static IEnumerable<MenuEntry> SinglesAmong(IEnumerable<string> registered)
@@ -78,7 +92,7 @@ namespace ClickableTerminal
 
             foreach (var entry in Singles)
             {
-                // Lategame Upgrades lists the same applications in its own folder (same developer): one place is enough.
+                // Lategame Upgrades lists the same apps in its own folder (same developer).
                 var key = Commands.Normalize(entry.Command);
                 if (Present().Any(group => group.Claims.Contains(key)))
                 {
@@ -111,7 +125,6 @@ namespace ClickableTerminal
                 {
                     new MenuEntry { Label = "UPGRADE STORE", Command = "lgu", Description = "Buy upgrades for the ship and the crew." },
                     new MenuEntry { Label = "CONTRACTS", Command = "contracts", Description = "Take on a contract for a reward." },
-                    new MenuEntry { Label = "CONTRACT INFO", Command = "contract info", Description = "What each kind of contract asks for." },
                     new MenuEntry { Label = "EXTEND DEADLINE", Command = "extend deadline", Description = "Buy more days before the quota is due." },
                     new MenuEntry { Label = "WEATHER PROBE", Command = "probe", Description = "Change the weather on a moon." },
                     new MenuEntry { Label = "INTERNS", Command = "interns", Description = "Replace the dead player on the radar with a new employee." },
@@ -119,7 +132,6 @@ namespace ClickableTerminal
                     new MenuEntry { Label = "CONVERT CREDITS", Command = "convert", Description = "Change company credits into player credits and back." },
                     new MenuEntry { Label = "STUN ATTACK", Command = "atk", Description = "Stun nearby enemies. Needs the Discombobulator." },
                     new MenuEntry { Label = "STUN COOLDOWN", Command = "cd", Description = "How long until the stun can be used again." },
-                    new MenuEntry { Label = "ALL COMMANDS", Command = "lgc", Description = "Every command of the mod as it describes them." },
                     new MenuEntry { Label = "ABOUT", Command = "lategame", Description = "What the mod has to say about itself." }
                 }
             },
@@ -156,6 +168,134 @@ namespace ClickableTerminal
             },
             new Group
             {
+                Plugin = LethalRpgPages.Guid,
+                Title = "LETHAL RPG",
+                Description = "Spend XP on upgrades for your body and your tools.",
+                Claims = new[] { "rpg" },
+                Page = LethalRpgPages.Menu
+            },
+            new Group
+            {
+                Plugin = "mattymatty.LobbyControl",
+                Title = "LOBBY",
+                Description = "Open or close the lobby to new players, and save or load the game. Host only.",
+                Claims = new[] { "lobby" },
+                Entries = new[]
+                {
+                    new MenuEntry { Label = "STATUS", Command = "lobby status", Description = "Whether the lobby is open, who can see it, and the save file." },
+                    new MenuEntry { Label = "OPEN", Command = "lobby open", Description = "Let new players join. Only in orbit." },
+                    new MenuEntry { Label = "CLOSE", Command = "lobby close", Description = "Keep new players out. Only in orbit." },
+                    new MenuEntry { Label = "PUBLIC", Command = "lobby public", Description = "Anyone can find the lobby." },
+                    new MenuEntry { Label = "FRIENDS ONLY", Command = "lobby friend", Description = "Only Steam friends can find the lobby." },
+                    new MenuEntry { Label = "INVITE ONLY", Command = "lobby private", Description = "Only invited players can join." },
+                    new MenuEntry
+                    {
+                        Label = "RENAME",
+                        Description = "Give the lobby a new name.",
+                        Click = () => Answers.Typed(TheTerminal(), "RENAME LOBBY", "Type the lobby's new name, then Enter.", "lobby rename ", "RENAME", 40)
+                    },
+                    new MenuEntry { Label = "AUTOSAVE", Command = "lobby autosave", Description = "Switch saving the game on its own on or off." },
+                    new MenuEntry
+                    {
+                        Label = "SAVE",
+                        Description = "Save the game under a name.",
+                        Click = () => Answers.Typed(TheTerminal(), "SAVE GAME", "Type a name for the save, then Enter.", "lobby save ", "SAVE", 30)
+                    },
+                    new MenuEntry
+                    {
+                        Label = "LOAD",
+                        Description = "Load a saved game into this lobby.",
+                        Click = () => Answers.Typed(TheTerminal(), "LOAD GAME", "Type the name of the save to load, then Enter. What is not saved is lost.", "lobby load ", "LOAD", 30)
+                    },
+                    new MenuEntry
+                    {
+                        Label = "SWITCH SAVE",
+                        Description = "Change which save file the game writes to, without loading it.",
+                        Click = () => Answers.Typed(TheTerminal(), "SWITCH SAVE", "Type the name of the save file to use from now on, then Enter.", "lobby switch ", "SWITCH", 30)
+                    },
+                    new MenuEntry
+                    {
+                        Label = "DROP ALL",
+                        Description = "Everyone drops everything they hold.",
+                        Click = () => Answers.AskFirst(TheTerminal(), "DROP ALL", "Make every player drop everything they hold?", "DROP ALL", "lobby dropall")
+                    },
+                    new MenuEntry
+                    {
+                        Label = "CLEAR",
+                        Description = "Reset this lobby to an empty game.",
+                        Click = () => Answers.AskFirst(TheTerminal(), "CLEAR LOBBY", "Reset this lobby to an empty game? Everything not saved is lost.", "CLEAR", "lobby clear")
+                    }
+                }
+            },
+            new Group
+            {
+                Plugin = "com.seeya.operator",
+                Title = "CASSETTES",
+                Description = "Play, save and delete what the camcorder recorded.",
+                Claims = new[] { "ohelp", "cassettes", "play", "stop", "save", "delete", "slow", "normal", "fast", "turbo", "pause", "resume", "volume", "transfer" },
+                Entries = new[]
+                {
+                    new MenuEntry { Label = "SAVED CASSETTES", Command = "cassettes", Description = "Every saved cassette, with its ID, value, date and length." },
+                    new MenuEntry
+                    {
+                        Label = "PLAY",
+                        Description = "Play a cassette on the terminal, by its ID.",
+                        Click = () => Answers.Typed(TheTerminal(), "PLAY", "Type the cassette's ID, then Enter.", "play ", "PLAY", 20)
+                    },
+                    new MenuEntry { Label = "STOP", Command = "stop", Description = "Stop playing." },
+                    new MenuEntry { Label = "PAUSE", Command = "pause", Description = "Pause playing." },
+                    new MenuEntry { Label = "RESUME", Command = "resume", Description = "Go on playing." },
+                    new MenuEntry
+                    {
+                        Label = "SPEED",
+                        Description = "Play slower or faster.",
+                        Click = () =>
+                        {
+                            var terminal = TheTerminal();
+                            var window = new Window { Title = "SPEED", Text = "How fast the cassette plays." };
+                            foreach (var speed in new[] { "slow", "normal", "fast", "turbo" })
+                            {
+                                window.Buttons.Add(new ToolButton { Label = speed.ToUpperInvariant(), Click = () => Answers.Run(terminal, "SPEED", speed) });
+                            }
+
+                            Window.Show(window);
+                        }
+                    },
+                    new MenuEntry
+                    {
+                        Label = "VOLUME",
+                        Description = "How loud the cassette plays, 0 to 100.",
+                        Click = () => Answers.Typed(TheTerminal(), "VOLUME", "Type the volume, 0 to 100, then Enter.", "volume ", "SET", 3)
+                    },
+                    new MenuEntry
+                    {
+                        Label = "SAVE",
+                        Description = "Keep a cassette in the library, by its ID.",
+                        Click = () => Answers.Typed(TheTerminal(), "SAVE CASSETTE", "Type the cassette's ID, then Enter.", "save ", "SAVE", 20)
+                    },
+                    new MenuEntry
+                    {
+                        Label = "DELETE",
+                        Description = "Take a cassette out of the library, by its ID.",
+                        Click = () => Answers.Typed(TheTerminal(), "DELETE CASSETTE", "Type the ID of the cassette to delete, then Enter.", "delete ", "DELETE", 20)
+                    },
+                    new MenuEntry { Label = "TRANSFER", Command = "transfer", Description = "Move what is playing onto the ship's monitor, where that is possible." }
+                }
+            },
+            new Group
+            {
+                Plugin = "gavin.shipcomputerassistant",
+                Title = "CREW MONITOR",
+                Description = "Health, place, weight and held item of every crew member.",
+                Claims = new[] { "crew", "crew upgrade", "crew monitoring", "buy crew monitor", "status" },
+                Entries = new[]
+                {
+                    new MenuEntry { Label = "CREW STATUS", Command = "crew", Description = "How every crew member is doing. Needs the software installed." },
+                    new MenuEntry { Label = "BUY THE SOFTWARE", Command = "crew upgrade", Description = "Install Crew Monitoring Software on the ship, for credits." }
+                }
+            },
+            new Group
+            {
                 Plugin = "thej01.lc.TerminalSeedPicker",
                 Title = "SEED PICKER",
                 Description = "See or set the seed the next moon is built from.",
@@ -168,8 +308,8 @@ namespace ClickableTerminal
                     {
                         Label = "SET SEED",
                         Description = "Type a seed for the next moon, text or numbers. Only in orbit.",
-                        Open = () => TypeForm.Build(UnityEngine.Object.FindObjectOfType<Terminal>(), "SET SEED", "set seed ",
-                            "Type the seed for the next moon:", "Text or numbers.")
+                        Click = () => Answers.Typed(UnityEngine.Object.FindObjectOfType<Terminal>(), "SET SEED",
+                            "Type the seed for the next moon, text or numbers, then Enter.", "set seed ", "SET", 40)
                     }
                 }
             }
@@ -199,7 +339,6 @@ namespace ClickableTerminal
             return Hidden.Contains(key) || SingleAliases.Contains(key) || Present().Any(group => group.Claims.Contains(key) || (group.Owns != null && group.Owns(key)));
         }
 
-        // The vanilla commands nobody lists, for the ones this terminal really has.
         internal static IEnumerable<MenuEntry> UnexplainedFor(Terminal terminal)
         {
             var keywords = terminal.terminalNodes != null ? terminal.terminalNodes.allKeywords : null;
@@ -217,7 +356,6 @@ namespace ClickableTerminal
             }
         }
 
-        // One main menu entry per mod we know, each opening a page with that mod's commands.
         internal static IEnumerable<MenuEntry> GroupEntries()
         {
             foreach (var group in Present())
@@ -239,7 +377,7 @@ namespace ClickableTerminal
                 return group.Page();
             }
 
-            var page = new MenuPage { Title = group.Title };
+            var page = Navigator.MenuLook(UnityEngine.Object.FindObjectOfType<Terminal>(), new MenuPage { Title = group.Title });
 
             foreach (var entry in group.Entries)
             {
@@ -256,7 +394,7 @@ namespace ClickableTerminal
                 }
             }
 
-            return page;
+            return Answers.InWindows(UnityEngine.Object.FindObjectOfType<Terminal>(), page);
         }
 
         private static readonly string[] None = new string[0];

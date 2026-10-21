@@ -6,7 +6,6 @@ using BepInEx.Bootstrap;
 
 namespace ClickableTerminal
 {
-    // SellMyScrap answers in plain text. The same figures, laid out like the rest of the terminal.
     internal static class SellMyScrapPages
     {
         private const string Guid = "com.github.zehsteam.SellMyScrap";
@@ -26,8 +25,8 @@ namespace ClickableTerminal
         private static readonly PageState State = new PageState();
         private static readonly PageState ItemState = new PageState();
 
-        // ScrapBank answers everything that starts with "sell" itself. SellMyScrap also listens to its commands
-        // written with a dash, which the other mod leaves alone.
+        // ScrapBank grabs everything that starts with "sell". SellMyScrap also takes its commands with a dash, which
+        // ScrapBank leaves alone.
         private static string Spelled(string command, string dashed)
         {
             return Chainloader.PluginInfos.ContainsKey("GJ.ScrapBank") ? dashed : command;
@@ -36,32 +35,81 @@ namespace ClickableTerminal
         internal static MenuPage Menu()
         {
             var terminal = UnityEngine.Object.FindObjectOfType<Terminal>();
-            var page = new MenuPage { Title = "SELL MY SCRAP" };
+            var page = Navigator.MenuLook(terminal, new MenuPage { Title = "SELL MY SCRAP" });
 
             page.Entries.Add(new MenuEntry { Label = "SELL QUOTA", Command = Spelled("sell quota", "sell-quota"), Description = "Sell just enough to meet the quota." });
             page.Entries.Add(new MenuEntry { Label = "SELL ALL", Command = Spelled("sell all", "sell-all"), Description = "Sell all the scrap on the ship." });
-            page.Entries.Add(new MenuEntry { Label = "SELL AMOUNT", Description = "Sell scrap worth an amount you set.", Open = () => AmountPage(terminal) });
+            page.Entries.Add(new MenuEntry { Label = "SELL AMOUNT", Description = "Sell scrap worth an amount you set.", Click = () => AmountWindow(terminal) });
             page.Entries.Add(new MenuEntry { Label = "SELL ITEM", Description = "Pick a kind of scrap and sell every one of it.", Open = () => ItemPage(terminal) });
             page.Entries.Add(new MenuEntry { Label = "SELL LIST", Command = Spelled("sell list", "sell-list"), Description = "Sell what is on the mod's sell list." });
             page.Entries.Add(new MenuEntry { Label = "VIEW SCRAP", Command = "view scrap", Description = "The scrap on the ship and what it is worth." });
             page.Entries.Add(new MenuEntry { Label = "VIEW ALL SCRAP", Command = "view all scrap", Description = "Every kind of scrap there is in the game." });
             page.Entries.Add(new MenuEntry { Label = "VIEW OVERTIME", Command = "view overtime", Description = "The overtime bonus as it stands." });
             page.Entries.Add(new MenuEntry { Label = "ABOUT", Command = Spelled("sell", "sell-help"), Description = "The mod's own list of its commands." });
+            Answers.InWindows(terminal, page);
+
+            // The mod takes whatever comes next as the answer to its last question, so that wait is let go first.
+            foreach (var entry in page.Entries)
+            {
+                var click = entry.Click;
+                if (click != null)
+                {
+                    entry.Click = () =>
+                    {
+                        LetGo();
+                        click();
+                    };
+                }
+            }
+
+            page.Entries.First(entry => entry.Label == "VIEW ALL SCRAP").Click = () =>
+            {
+                LetGo();
+                AllScrap(terminal, "view all scrap");
+            };
             return page;
         }
 
-        private static MenuPage AmountPage(Terminal terminal)
+        private static void LetGo()
+        {
+            try
+            {
+                Reflect.Find("com.github.zehsteam.SellMyScrap.Commands.CommandManager")?
+                    .GetField("AwaitingConfirmationCommand", HarmonyLib.AccessTools.all)?.SetValue(null, null);
+            }
+            catch (Exception e)
+            {
+                Plugin.WarnOnce("SellMyScrap: could not let go of its waiting command: " + e.Message);
+            }
+        }
+
+        private static void AllScrap(Terminal terminal, string command)
+        {
+            var answer = Commands.Ask(terminal, command);
+            var cut = answer.IndexOf("The following commands are available", StringComparison.OrdinalIgnoreCase);
+            var window = new Window
+            {
+                Title = "ALL SCRAP",
+                Text = Window.Tidy(cut > 0 ? answer.Substring(0, cut) : answer, ""),
+                Closing = LetGo
+            };
+            window.Buttons.Add(new ToolButton { Label = "PREV", Click = () => AllScrap(terminal, "prev") });
+            window.Buttons.Add(new ToolButton { Label = "NEXT", Click = () => AllScrap(terminal, "next") });
+            window.Buttons.Add(new ToolButton { Label = "CLOSE", Click = Window.Close });
+            Window.Show(window);
+        }
+
+        private static void AmountWindow(Terminal terminal)
         {
             var time = TimeOfDay.Instance;
             var needed = time != null ? Math.Max(0, time.profitQuota - time.quotaFulfilled) : 0;
-            return AmountForm.Build(terminal, "SELL AMOUNT", "Sell scrap worth", "SELL",
-                amount => Spelled("sell ", "sell-amount ") + amount, needed, "SET TO WHAT THE QUOTA NEEDS");
+            Answers.Typed(terminal, "SELL AMOUNT", "Type the value of scrap to sell, then Enter.", Spelled("sell ", "sell-amount "), "SELL", 6,
+                Answers.Fill(terminal, $"QUOTA NEEDS ${needed}", needed.ToString()));
         }
 
         private const string ItemTitle = "SELL ITEM";
         private static string report;
 
-        // The kinds of scrap lying in the ship. A click sells every one of that kind, and the list stays to pick the next.
         private static MenuPage ItemPage(Terminal terminal)
         {
             var page = new MenuPage
@@ -115,13 +163,12 @@ namespace ClickableTerminal
                 return;
             }
 
-            // The mod's own command, with its question and all.
             report = null;
             Navigator.DropCurrent();
             Commands.Submit(terminal, Spelled("sell item ", "sell-item ") + name);
         }
 
-        // The sold scrap leaves the ship a moment later, so the list is drawn again a few times while it does.
+        // The sold scrap leaves the ship a moment later.
         private static System.Collections.IEnumerator Refresh(Terminal terminal)
         {
             for (var i = 0; i < 16; i++)
@@ -138,8 +185,7 @@ namespace ClickableTerminal
             }
         }
 
-        // The same steps the mod's "sell item" takes and then its "confirm", without leaving the list in between.
-        // False when the mod could not be driven this way. "refused" is the mod's own reason when it will not sell.
+        // The same steps as the mod's "sell item" and then "confirm". False when the mod cannot be driven this way.
         private static bool Sell(Terminal terminal, string name, out string refused)
         {
             refused = null;
@@ -166,7 +212,7 @@ namespace ClickableTerminal
                     return true;
                 }
 
-                // The mod matches names loosely ("Bell" also finds "Bell pepper"), so the list is narrowed to the exact one.
+                // The mod matches loosely ("Bell" also finds "Bell pepper").
                 var loose = (System.Collections.IList)helper.GetMethod("GetAllScrapByItemNames", any)
                     .Invoke(null, new object[] { new[] { name }, false, false, false });
                 var exact = (System.Collections.IList)Activator.CreateInstance(loose.GetType());
@@ -203,8 +249,8 @@ namespace ClickableTerminal
             }
         }
 
-        // Takes the page when it is one of the mod's. Its questions get the answer that lets go of them:
-        // while the mod waits for one, everything typed goes to it, also after its page is gone.
+        // While the mod waits for an answer it takes everything typed, even after its page is gone, so its questions get
+        // answered.
         internal static bool Claim(Terminal terminal, View view, string printed, string back)
         {
             if (!Chainloader.PluginInfos.ContainsKey(Guid))
@@ -342,7 +388,7 @@ namespace ClickableTerminal
             return page;
         }
 
-        // The mod shows this list a page at a time and waits for "next", "prev", "page 3" or "exit".
+        // The mod pages this list and waits for "next", "prev", "page 3" or "exit".
         private static MenuPage AllScrap(Terminal terminal, List<string> lines)
         {
             var page = new MenuPage { Title = "ALL SCRAP", HideHeads = true };
@@ -372,7 +418,7 @@ namespace ClickableTerminal
                 }
                 else if (listing && line.Length > 0)
                 {
-                    // Two names to a line, the second column carrying on where the first one ends.
+                    // Two names to a line.
                     var names = Gap.Split(line);
                     page.Entries.Add(new MenuEntry { Label = names[0], Cells = new[] { names.Length > 1 ? names[1] : "" } });
                 }

@@ -2,7 +2,6 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // The amount on an item's order form, changed the way the game would change it.
     internal static class AmountStepper
     {
         internal const string Less = "[ - ]";
@@ -30,12 +29,10 @@ namespace ClickableTerminal
                 return;
             }
 
-            // The game recounts the total and prints the page again with the new amount.
             terminal.playerDefinedAmount = amount;
             terminal.LoadNewNodeIfAffordable(node);
         }
 
-        // The same limits the game checks, so a click never lands on an error page.
         internal static bool CanSet(Terminal terminal, TerminalNode node, int amount)
         {
             if (amount < 1 || amount > 10)

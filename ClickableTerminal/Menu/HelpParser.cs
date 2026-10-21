@@ -3,8 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace ClickableTerminal
 {
-    // Reads the ">MOONS / To see the list of moons..." blocks out of a page the game has already printed.
-    // Mods that add their own block to the help page (TooManyEmotes does) get a menu entry for free.
+    // Mods that add a block to the help page (TooManyEmotes does) get a menu entry for free.
     internal static class HelpParser
     {
         private static readonly Regex Tags = new Regex("<[^>]+>", RegexOptions.Compiled);
@@ -42,7 +41,7 @@ namespace ClickableTerminal
 
         private static MenuEntry FromHeading(string heading)
         {
-            // ">ATK / INITATTACK" lists two spellings of one command. The first is enough.
+            // ">ATK / INITATTACK" lists two spellings of one command.
             var alias = heading.IndexOf(" / ", System.StringComparison.Ordinal);
             if (alias > 0)
             {
@@ -57,7 +56,7 @@ namespace ClickableTerminal
 
             var entry = new MenuEntry { Label = heading.ToUpperInvariant() };
 
-            // ">PING [Radar booster name]" cannot be run by a click alone, the name has to be typed.
+            // ">PING [Radar booster name]" needs a name typed after it.
             if (argument > 0)
             {
                 entry.Prefill = heading.Substring(0, argument).Trim().ToLowerInvariant() + " ";

@@ -1,8 +1,10 @@
+using System.Collections.Generic;
+using System.Linq;
 using GameNetcodeStuff;
+using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // The names SWITCH, PING and FLASH can be followed by: the players and radar boosters on the ship's radar.
     internal static class TargetsPage
     {
         internal static bool Handles(string verb)
@@ -10,63 +12,211 @@ namespace ClickableTerminal
             return verb == "switch" || verb == "ping" || verb == "flash";
         }
 
-        internal static MenuPage Build(string verb)
+        private class Seen
+        {
+            internal int Index;
+            internal string Name;
+            internal string Word;
+            internal bool Dead;
+            internal RadarBoosterItem Item;
+        }
+
+        internal static MenuPage MonitorPage(Terminal terminal)
         {
             var radar = StartOfRound.Instance != null ? StartOfRound.Instance.mapScreen : null;
-            if (radar == null || radar.radarTargets == null)
+            var camera = radar == null ? null : radar.mapCamera != null ? radar.mapCamera : radar.cam;
+            if (camera == null || camera.targetTexture == null)
             {
                 return null;
             }
 
-            var page = new MenuPage { Title = verb.ToUpperInvariant() };
-
-            // SWITCH on its own moves to the next one in line.
-            if (verb == "switch")
+            return new MenuPage
             {
-                page.Entries.Add(new MenuEntry { Label = "Next in line", Command = verb });
-                page.Entries.Add(new MenuEntry { Label = "", IsHeader = true });
+                Title = "MONITOR",
+                Subtitle = "Type a door's or trap's code from the map, then Enter",
+                Picture = camera.targetTexture,
+                Camera = camera,
+                Extra = () => Controls(terminal, radar),
+                LivePanels = true,
+                Send = code =>
+                {
+                    code = (code ?? "").Trim();
+                    if (code.Length > 0)
+                    {
+                        Commands.Ask(terminal, code);
+                    }
+                }
+            };
+        }
+
+        private static Detail Controls(Terminal terminal, ManualCameraRenderer radar)
+        {
+            var everyone = Watchable(radar);
+            var boosters = Boosters(radar);
+            var watched = everyone.FirstOrDefault(each => each.Index == radar.targetTransformIndex);
+            var panel = new Detail { Title = "RADAR" };
+
+            void Run(string command)
+            {
+                Commands.Ask(terminal, command);
+                Navigator.Rebuild(terminal);
             }
 
-            var listed = 0;
+            var watching = panel.Group("WATCHING");
+            if (everyone.Count > 0)
+            {
+                var at = Mathf.Max(0, everyone.IndexOf(watched));
+                var before = everyone[(at - 1 + everyone.Count) % everyone.Count];
+                watching.Add(new ToolButton { Label = "<", Narrow = true, Off = before.Word == null || everyone.Count < 2, Click = () => Run("switch " + before.Word) });
+                watching.Add(new ToolButton { Label = watched != null ? watched.Name : "-", Active = true, Click = () => CrewWindow(terminal) });
+                watching.Add(new ToolButton { Label = ">", Narrow = true, Off = everyone.Count < 2, Click = () => Run("switch") });
+            }
 
-            for (var i = 0; i < radar.radarTargets.Count; i++)
+            // The radar's own calls, the ones PING and FLASH make. They tell the other players themselves.
+            var item = watched != null ? watched.Item : null;
+            if (boosters.Count > 0)
+            {
+                var index = watched != null ? watched.Index : -1;
+                var actions = panel.Group(null);
+                actions.Add(new ToolButton
+                {
+                    Label = "PING",
+                    Off = item == null,
+                    Click = () =>
+                    {
+                        radar.PingRadarBooster(index);
+                        Navigator.Rebuild(terminal);
+                    }
+                });
+                actions.Add(new ToolButton
+                {
+                    Label = "FLASH",
+                    Off = item == null || !item.radarEnabled || !FlashReady(item),
+                    Click = () =>
+                    {
+                        radar.FlashRadarBooster(index);
+                        Navigator.Rebuild(terminal);
+                    }
+                });
+            }
+
+            // Who can be beamed up (a player, or with some mods a radar booster) is the game's business.
+            var teleporter = Object.FindObjectsOfType<ShipTeleporter>().FirstOrDefault(each => !each.isInverseTeleporter);
+            var ready = teleporter != null && (teleporter.buttonTrigger == null || teleporter.buttonTrigger.interactable);
+            panel.Group(null).Add(new ToolButton
+            {
+                Label = teleporter != null && !ready ? "CHARGING" : "TELEPORT",
+                Off = teleporter != null && !ready,
+                Click = () =>
+                {
+                    if (teleporter == null)
+                    {
+                        StorePage.OfferUpgrade(terminal, "Teleporter", "The ship has no teleporter. It is sold in the store, with the ship upgrades.");
+                        return;
+                    }
+
+                    teleporter.PressTeleportButtonOnLocalClient();
+                    Navigator.Rebuild(terminal);
+                }
+            });
+
+            var shown = terminal.displayingPersistentImage != null;
+            panel.Group("TERMINAL").Add(new ToolButton
+            {
+                Label = "MAP: " + (shown ? "ON" : "OFF"),
+                Active = shown,
+                Click = () => Run("view monitor")
+            });
+
+            return panel;
+        }
+
+        private static readonly System.Reflection.FieldInfo FlashCooldown = HarmonyLib.AccessTools.Field(typeof(RadarBoosterItem), "flashCooldown");
+
+        private static bool FlashReady(RadarBoosterItem item)
+        {
+            return FlashCooldown == null || !((float)FlashCooldown.GetValue(item) >= 0f);
+        }
+
+        private static void CrewWindow(Terminal terminal)
+        {
+            var radar = StartOfRound.Instance != null ? StartOfRound.Instance.mapScreen : null;
+            if (radar == null)
+            {
+                return;
+            }
+
+            var window = new Window { Title = "WATCH WHO?" };
+            var crew = window.Group("CREW");
+            var boosters = window.Group("RADAR BOOSTERS");
+            foreach (var each in Watchable(radar))
+            {
+                var word = each.Word;
+                (each.Item != null ? boosters : crew).Add(new ToolButton
+                {
+                    Label = each.Name + (each.Dead ? " (dead)" : ""),
+                    Active = each.Index == radar.targetTransformIndex,
+                    Off = word == null,
+                    Click = () =>
+                    {
+                        Commands.Ask(terminal, "switch " + word);
+                        Window.Close();
+                        Navigator.Rebuild(terminal);
+                    }
+                });
+            }
+
+            window.Groups.RemoveAll(group => group.Value.Count == 0);
+            window.Buttons.Add(new ToolButton { Label = "BACK", Click = Window.Close });
+            Window.Show(window);
+        }
+
+        private static List<Seen> Watchable(ManualCameraRenderer radar)
+        {
+            var players = Players(radar);
+            return players.Concat(Boosters(radar)).OrderBy(each => each.Index).ToList();
+        }
+
+        private static List<Seen> Players(ManualCameraRenderer radar)
+        {
+            var found = new List<Seen>();
+            for (var i = 0; radar.radarTargets != null && i < radar.radarTargets.Count; i++)
             {
                 var target = radar.radarTargets[i];
-                if (target == null || target.transform == null || string.IsNullOrWhiteSpace(target.name))
+                if (target == null || target.transform == null || target.isNonPlayer || string.IsNullOrWhiteSpace(target.name))
                 {
                     continue;
                 }
 
-                // Only SWITCH works on players, and only on the ones who are really in the game.
-                if (!target.isNonPlayer)
+                var player = target.transform.GetComponent<PlayerControllerB>();
+                if (player != null && (player.isPlayerControlled || player.isPlayerDead))
                 {
-                    var player = target.transform.GetComponent<PlayerControllerB>();
-                    if (verb != "switch" || player == null || (!player.isPlayerControlled && !player.isPlayerDead))
-                    {
-                        continue;
-                    }
+                    found.Add(new Seen { Index = i, Name = target.name, Word = Word(target.name), Dead = player.isPlayerDead });
                 }
-
-                // The game reads one word after the command and matches the start of the name with it.
-                var word = target.name.Trim().Split(' ')[0];
-                var label = target.name + (target.isNonPlayer ? "  (radar booster)" : "")
-                                        + (i == radar.targetTransformIndex ? "  (on the monitor)" : "");
-
-                page.Entries.Add(new MenuEntry
-                {
-                    Label = label,
-                    Command = word.Length > 2 ? verb + " " + word : null,
-                    Dim = word.Length <= 2
-                });
-                listed++;
             }
 
-            if (listed == 0)
+            return found;
+        }
+
+        private static List<Seen> Boosters(ManualCameraRenderer radar)
+        {
+            var found = new List<Seen>();
+            for (var i = 0; radar.radarTargets != null && i < radar.radarTargets.Count; i++)
             {
-                page.Entries.Add(new MenuEntry { Label = verb == "switch" ? "Nobody to switch to." : "No radar boosters are active.", IsHeader = true });
+                var target = radar.radarTargets[i];
+                if (target != null && target.transform != null && target.isNonPlayer && !string.IsNullOrWhiteSpace(target.name))
+                {
+                    found.Add(new Seen { Index = i, Name = target.name, Word = Word(target.name), Item = target.transform.GetComponent<RadarBoosterItem>() });
+                }
             }
 
-            return page;
+            return found;
+        }
+
+        private static string Word(string name)
+        {
+            var word = (name ?? "").Trim().Split(' ')[0];
+            return word.Length > 2 ? word : null;
         }
     }
 }

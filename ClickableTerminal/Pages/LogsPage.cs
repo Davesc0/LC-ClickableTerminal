@@ -2,9 +2,19 @@ using System.Collections.Generic;
 
 namespace ClickableTerminal
 {
-    // The log entries the crew has found, as a list to click instead of names to type after VIEW.
     internal static class LogsPage
     {
+        // Reading it counts, as on the game's own page.
+        private static void Read(Terminal terminal, TerminalNode file)
+        {
+            Window.Show(new Window { Title = (file.creatureName ?? "").ToUpperInvariant(), Text = Window.Tidy(Commands.PageText(terminal, file), file.creatureName) });
+
+            if (terminal.newlyUnlockedStoryLogs != null && terminal.newlyUnlockedStoryLogs.Remove(file.storyLogFileID))
+            {
+                Navigator.Rebuild(terminal);
+            }
+        }
+
         internal static MenuPage Build(Terminal terminal)
         {
             var files = terminal.logEntryFiles;
@@ -15,7 +25,15 @@ namespace ClickableTerminal
 
             var catalog = Catalog.Read(terminal);
             var found = terminal.unlockedStoryLogs ?? new List<int>();
-            var page = new MenuPage { Title = "LOGS" };
+            var texts = new Dictionary<MenuEntry, TerminalNode>();
+            var page = new MenuPage
+            {
+                Title = "LOGS",
+                Subtitle = $"{found.Count} of {files.Count} entries found",
+                DetailFor = entry => texts.TryGetValue(entry, out var file)
+                    ? new Detail { Title = file.creatureName, Text = Catalog.Excerpt(file.displayText, 3, 240), Foot = "SELECT: READ" }
+                    : null
+            };
 
             foreach (var file in files)
             {
@@ -25,11 +43,16 @@ namespace ClickableTerminal
                 }
 
                 var isNew = terminal.newlyUnlockedStoryLogs != null && terminal.newlyUnlockedStoryLogs.Contains(file.storyLogFileID);
-                page.Entries.Add(new MenuEntry
+                var log = file;
+                var row = new MenuEntry
                 {
-                    Label = (file.creatureName ?? "") + (isNew ? "  (NEW)" : ""),
-                    Command = target.Command
-                });
+                    Label = file.creatureName ?? "",
+                    Description = isNew ? "New" : null,
+                    Command = target.Command,
+                    Click = () => Read(terminal, log)
+                };
+                texts[row] = file;
+                page.Entries.Add(row);
             }
 
             if (page.Entries.Count == 0)

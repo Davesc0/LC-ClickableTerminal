@@ -3,8 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace ClickableTerminal
 {
-    // FlipMods' TooManyEmotes prints its emote store as a list and reads what is typed in its own code,
-    // so nothing in the game says what to send for a line. Its page is recognised by its header and rebuilt here.
+    // TooManyEmotes reads what is typed in its own code, so nothing in the game says what to send for a line.
     internal static class TooManyEmotesStore
     {
         private const string Header = "[TooManyEmotes]";
@@ -36,11 +35,9 @@ namespace ClickableTerminal
                     var price = entry.Groups[2].Value;
                     var bought = price.IndexOf("purchased", StringComparison.OrdinalIgnoreCase) >= 0;
 
-                    // The mod colours each name by how rare the emote is. The colour is kept for the label,
-                    // the bare name is what gets sent.
+                    // Coloured by rarity. The colour stays on the label, the bare name is what gets sent.
                     var coloured = Entry.Match(raw.Trim());
 
-                    // "emote <name>" is what the mod listens for. A bought one has nothing left to do.
                     page.Entries.Add(new MenuEntry
                     {
                         Label = coloured.Success && !bought ? coloured.Groups[1].Value : name,
@@ -51,7 +48,7 @@ namespace ClickableTerminal
                 }
                 else if (balance.Success)
                 {
-                    // "Emote credit: $100", and the group's own when the mod is set to take those too.
+                    // "Emote credit: $100"
                     var text = Capital(balance.Groups[1].Value) + ": " + balance.Groups[2].Value;
                     page.Summary = page.Summary == null ? text : page.Summary + "   " + text;
                 }

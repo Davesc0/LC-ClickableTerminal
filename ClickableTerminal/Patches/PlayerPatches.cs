@@ -9,7 +9,7 @@ namespace ClickableTerminal.Patches
     [HarmonyPatch(typeof(PlayerControllerB))]
     internal static class PlayerPatches
     {
-        // The mouse moves the terminal cursor, so it must not turn the head as well.
+        // The mouse moves the terminal cursor, so it must not turn the head too.
         [HarmonyPatch("PlayerLookInput")]
         [HarmonyPrefix]
         private static bool KeepHeadStill(PlayerControllerB __instance)
@@ -17,10 +17,8 @@ namespace ClickableTerminal.Patches
             return !(TerminalMouse.InUse && __instance.inTerminalMenu);
         }
 
-        // The game moves the terminal a third of the page per turn of the wheel, whatever the page's length.
-        // Here it moves a set number of lines. On our own pages and over an application's counters and pages
-        // the wheel is ours already, so the hidden game text is left where it is. Everything else the method
-        // does (the hotbar) is untouched: this only steps in while the terminal is open.
+        // The game moves a third of the page per wheel turn, whatever its length. Here it is a set number of lines, and
+        // on our pages the wheel is ours already.
         [HarmonyPatch("ScrollMouse_performed")]
         [HarmonyPrefix]
         private static bool ScrollByLines(PlayerControllerB __instance, InputAction.CallbackContext context)

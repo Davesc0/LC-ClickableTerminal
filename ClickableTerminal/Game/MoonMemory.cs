@@ -7,8 +7,7 @@ using BepInEx.Configuration;
 
 namespace ClickableTerminal
 {
-    // Which moons each save file has flown to and landed on. The game only knows where the ship is now,
-    // so it is kept here, in a file of its own next to the config.
+    // The game only knows where the ship is now, so visited moons are kept in a file of our own.
     internal static class MoonMemory
     {
         private const string Flown = "FlownTo";
@@ -32,11 +31,6 @@ namespace ClickableTerminal
             return Knows(Flown, level);
         }
 
-        internal static bool HasLandedOn(SelectableLevel level)
-        {
-            return Knows(Landed, level);
-        }
-
         private static void Remember(string list, SelectableLevel level)
         {
             var entry = Entry(list);
@@ -56,7 +50,6 @@ namespace ClickableTerminal
             return entry != null && level != null && Split(entry.Value).Contains(KeyOf(level));
         }
 
-        // The number in front of a planet name is not part of what it is called.
         private static string KeyOf(SelectableLevel level)
         {
             return Commands.Normalize(MoonsPage.NameOf(level));

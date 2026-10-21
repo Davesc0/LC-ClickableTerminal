@@ -5,10 +5,9 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // Answers the game gives in sentences, laid out as figures instead.
     internal static class ResultPages
     {
-        // "* Facility   // Chance: 29.76%", the way a simulation lists what a moon may hold.
+        // "* Facility   // Chance: 29.76%"
         private static readonly Regex Chance = new Regex(@"^\s*\*\s*(.+?)\s*//\s*Chance:\s*([0-9.,]+\s*%)", RegexOptions.Compiled);
         private static readonly Regex Arrival = new Regex(@"arrival to\s+\d*\s*(.+?)\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex Tags = new Regex("<[^>]+>", RegexOptions.Compiled);
@@ -22,7 +21,7 @@ namespace ClickableTerminal
             var cost = terminal.totalCostOfItems;
             var credits = terminal.groupCredits;
 
-            var page = new MenuPage { Title = "NOT ENOUGH CREDITS", HideHeads = true, Plain = true };
+            var page = new MenuPage { Title = "NOT ENOUGH CREDITS", HideHeads = true, Plain = true, Dialog = true };
             page.Columns.Add(new Column());
             page.Columns.Add(new Column { Chars = 12, AlignRight = true });
 
@@ -35,7 +34,6 @@ namespace ClickableTerminal
             return page;
         }
 
-        // The page the game shows once an order or a route has gone through.
         internal static bool IsReceipt(Terminal terminal, TerminalNode node)
         {
             return !node.isConfirmationNode && !node.overrideOptions
@@ -83,7 +81,7 @@ namespace ClickableTerminal
                 return null;
             }
 
-            var page = new MenuPage { Title = "RECEIPT", HideHeads = true, Plain = true };
+            var page = new MenuPage { Title = "RECEIPT", HideHeads = true, Plain = true, Dialog = true };
             page.Columns.Add(new Column());
             page.Columns.Add(new Column { Chars = 12, AlignRight = true });
 
@@ -152,7 +150,6 @@ namespace ClickableTerminal
             return page;
         }
 
-        // True for pages that are only sentences: no list to click, no commands to pick from.
         internal static bool IsProse(string printed)
         {
             var any = false;
@@ -176,7 +173,6 @@ namespace ClickableTerminal
             return any;
         }
 
-        // A heading when the text starts with one, a bar for every "LABEL: ..." paragraph, the sentences wrapped under it.
         internal static MenuPage Document(Terminal terminal, string printed, string back)
         {
             var lines = new List<string>();
@@ -202,7 +198,7 @@ namespace ClickableTerminal
             {
                 var line = i < lines.Count ? lines[i] : "";
 
-                // "Date: August 22, 1968" is a line of its own, not the start of the sentence after it.
+                // "Date: August 22, 1968" is a line of its own, not the start of the next sentence.
                 if (Field.IsMatch(line))
                 {
                     if (paragraph.Length > 0)
@@ -232,7 +228,6 @@ namespace ClickableTerminal
             return page;
         }
 
-        // A log entry: its title on top, then the entry itself.
         internal static MenuPage Log(Terminal terminal, TerminalNode node, string printed, string back)
         {
             var page = Document(terminal, printed, back);
@@ -253,7 +248,6 @@ namespace ClickableTerminal
             return ConfirmOrDeny.IsMatch(Tags.Replace(printed, ""));
         }
 
-        // A yes or no question we have no form for (eject, a mod's own): its wording, then a button for every answer it takes.
         internal static MenuPage Question(string printed, IEnumerable<string> answers)
         {
             var page = new MenuPage { Title = "CONFIRM", Plain = true };
@@ -285,7 +279,6 @@ namespace ClickableTerminal
             return page;
         }
 
-        // A creature's file: its name and figures first, then what the game has written about it.
         internal static MenuPage Creature(Terminal terminal, TerminalNode node, string printed, string back)
         {
             var page = Document(terminal, printed, back);
@@ -304,7 +297,6 @@ namespace ClickableTerminal
                 var health = CreatureIndex.HealthOf(enemy);
 
                 Figure(top, "Health", health.HasValue ? health.Value.ToString() : "Cannot be killed");
-                Figure(top, "Damage", EnemyDamage.Of(enemy) ?? "Unknown");
                 Figure(top, "Power", enemy.PowerLevel.ToString("0.#"));
                 Figure(top, "Max at once", enemy.MaxCount.ToString());
                 Figure(top, "Stunnable", enemy.canBeStunned ? "Yes" : "No");
@@ -342,10 +334,9 @@ namespace ClickableTerminal
             }
         }
 
-        // Rows are one line each and cut off, so the sentences are broken up here, between words.
+        // Rows are one line each and get cut off, so the sentences are broken up here.
         private static IEnumerable<string> Wrap(string text, int width)
         {
-            // Smaller letters, longer lines.
             width = Mathf.RoundToInt(width / Mathf.Clamp(Settings.TextScale.Value, 0.6f, 1f));
             var line = "";
 
@@ -368,7 +359,7 @@ namespace ClickableTerminal
             }
         }
 
-        // The names come out as the files are called: "Toystoreflow", "Level_three".
+        // "Toystoreflow", "Level_three"
         private static string Tidy(string name)
         {
             name = name.Replace('_', ' ').Trim();

@@ -13,8 +13,6 @@ using UnityEngine;
 
 namespace ClickableTerminal
 {
-    // ScrapBank is driven by typing: a command, then numbers picked off the lists it prints.
-    // Its commands get a menu, and the numbers on its lists become rows to click.
     internal static class ScrapBankPages
     {
         internal const string Guid = "GJ.ScrapBank";
@@ -26,7 +24,7 @@ namespace ClickableTerminal
         // " 3. Cash register x2       $120"
         private static readonly Regex Numbered = new Regex(@"^(\d+)\.\s+(.+?)\s+(\$[\d,.]+)$", RegexOptions.Compiled);
 
-        // "2 / ALL = ..." after the words in the mod's other language are taken out
+        // "2 / ALL = ..." once the mod's other language is stripped
         private static readonly Regex Choice = new Regex(@"^(\d+)\s*/\s*([A-Z]+)", RegexOptions.Compiled);
         private static readonly Regex Leftover = new Regex(@"(\s*/\s*)+(?=\s*[:=]|\s*$)", RegexOptions.Compiled);
         private static readonly Regex Spaces = new Regex(@"\s{2,}", RegexOptions.Compiled);
@@ -45,7 +43,7 @@ namespace ClickableTerminal
         internal static MenuPage Menu()
         {
             var terminal = UnityEngine.Object.FindObjectOfType<Terminal>();
-            var page = new MenuPage { Title = "SCRAP BANK" };
+            var page = Navigator.MenuLook(terminal, new MenuPage { Title = "SCRAP BANK" });
 
             page.Entries.Add(new MenuEntry { Label = "BALANCE", Command = "bank status", Description = "The scrap money in the bank." });
             page.Entries.Add(new MenuEntry { Label = "STORE ALL", Command = "scrap all", Description = "Turn all the scrap in the ship into scrap money." });
@@ -53,7 +51,7 @@ namespace ClickableTerminal
             {
                 Label = "STORE AMOUNT",
                 Description = "Store scrap worth up to an amount you set.",
-                Open = () => AmountForm.Build(terminal, "STORE AMOUNT", "Store scrap worth up to", "STORE", amount => "scrap " + amount, 0, null)
+                Click = () => Answers.Typed(terminal, "STORE AMOUNT", "Type the value of scrap to store at most, then Enter.", "scrap ", "STORE", 6)
             });
             page.Entries.Add(new MenuEntry { Label = "STORE BY ITEM", Description = "Tick single items in the ship and store those.", Open = () => ItemPage(terminal) });
             page.Entries.Add(new MenuEntry { Label = "SELL QUOTA", Command = "sell quota", Description = "Sell scrap money to meet the quota. Only at the Company." });
@@ -62,14 +60,15 @@ namespace ClickableTerminal
             {
                 Label = "SELL AMOUNT",
                 Description = "Sell an amount of scrap money you set. Only at the Company.",
-                Open = () =>
+                Click = () =>
                 {
                     var time = TimeOfDay.Instance;
                     var needed = time != null ? Math.Max(0, time.profitQuota - time.quotaFulfilled) : 0;
-                    return AmountForm.Build(terminal, "SELL AMOUNT", "Sell scrap money worth", "SELL", amount => "sell " + amount, needed, "SET TO WHAT THE QUOTA NEEDS");
+                    Answers.Typed(terminal, "SELL AMOUNT", "Type the scrap money to sell, then Enter.", "sell ", "SELL", 6,
+                        Answers.Fill(terminal, $"QUOTA NEEDS ${needed}", needed.ToString()));
                 }
             });
-            return page;
+            return Answers.InWindows(terminal, page);
         }
 
         private const string ItemTitle = "STORE BY ITEM";
@@ -78,7 +77,6 @@ namespace ClickableTerminal
         private static bool storing;
         private static Terminal pending;
 
-        // Every piece of scrap in the ship on a row of its own. A click stores it, and the list stays to pick the next.
         private static MenuPage ItemPage(Terminal terminal)
         {
             var page = new MenuPage
@@ -111,8 +109,13 @@ namespace ClickableTerminal
                 });
             }
 
-            page.Summary = storing ? "Storing..."
-                : report ?? (rows.Count == 0 ? "No scrap in the ship that can be stored." : "Click an item to store it.");
+            if (report != null && !storing)
+            {
+                Window.Show(new Window { Title = ItemTitle, Text = report });
+                report = null;
+            }
+
+            page.Summary = storing ? "Storing..." : rows.Count == 0 ? "No scrap in the ship that can be stored." : "Click an item to store it.";
             page.Entries.AddRange(ItemState.Sorted(rows));
             return page;
         }
@@ -122,7 +125,6 @@ namespace ClickableTerminal
             return Chainloader.PluginInfos[Guid].Instance.GetType().Assembly.GetTypes().FirstOrDefault(type => type.Name == name);
         }
 
-        // What the mod itself would take, as far as it can be asked. Otherwise loose scrap lying in the ship.
         private static List<GrabbableObject> Storable()
         {
             MethodInfo eligible = null;
@@ -170,7 +172,7 @@ namespace ClickableTerminal
                     var manager = Find("ScrapBankManager");
                     var result = manager.GetNestedType("StoreResult", AccessTools.all);
 
-                    // The mod reports back through a callback of its own type, so one of that type is made for it.
+                    // The mod reports back through a callback of its own type, so one is built for it.
                     var parameter = Expression.Parameter(result);
                     var done = Expression.Lambda(typeof(Action<>).MakeGenericType(result),
                         Expression.Call(typeof(ScrapBankPages).GetMethod(nameof(Stored), AccessTools.all), Expression.Convert(parameter, typeof(object))),
@@ -245,7 +247,6 @@ namespace ClickableTerminal
             }
         }
 
-        // Takes the page when it is the mod's answer: one row per line, as it prints tables, not sentences.
         internal static bool Claim(Terminal terminal, View view, string printed, string submitted, string back)
         {
             if (!Chainloader.PluginInfos.ContainsKey(Guid))
@@ -268,7 +269,7 @@ namespace ClickableTerminal
                 return false;
             }
 
-            // A screen that waits for one of its numbers keeps waiting when the player walks away from it.
+            // This screen keeps waiting for a number even after the player walks away.
             if (lines.Exists(line => Choice.IsMatch(line) && line.Contains("CANCEL")))
             {
                 view.Question = true;
@@ -305,7 +306,6 @@ namespace ClickableTerminal
                     continue;
                 }
 
-                // What to type is what the rows are for.
                 if (line.Contains("ENTER") || line.StartsWith("Page:"))
                 {
                     continue;
@@ -355,7 +355,7 @@ namespace ClickableTerminal
             return page;
         }
 
-        // The mod prints every line in two languages, and the terminal's font only has the letters of one.
+        // The mod prints every line in two languages, and the terminal font only has the letters of one.
         private static string Clean(string line)
         {
             var kept = new StringBuilder(line.Length);
