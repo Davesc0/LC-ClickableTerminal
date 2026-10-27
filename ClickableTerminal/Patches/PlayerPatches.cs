@@ -17,8 +17,7 @@ namespace ClickableTerminal.Patches
             return !(TerminalMouse.InUse && __instance.inTerminalMenu);
         }
 
-        // The game moves a third of the page per wheel turn, whatever its length. Here it is a set number of lines, and
-        // on our pages the wheel is ours already.
+        // The game moves a third of the page per wheel turn, whatever its length. Here it is a set number of lines, and on our pages the wheel is ours already.
         [HarmonyPatch("ScrollMouse_performed")]
         [HarmonyPrefix]
         private static bool ScrollByLines(PlayerControllerB __instance, InputAction.CallbackContext context)

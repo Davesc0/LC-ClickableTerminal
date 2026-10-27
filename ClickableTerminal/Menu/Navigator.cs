@@ -53,8 +53,7 @@ namespace ClickableTerminal
         {
             left = new List<View>(History);
 
-            // Questions, and pages whose loading does something (a monitor switch, an eject), are not places to come
-            // back to.
+            // Questions, and pages whose loading does something (a monitor switch, an eject), are not places to come back to.
             while (left.Count > 1)
             {
                 var last = left[left.Count - 1];
@@ -106,8 +105,7 @@ namespace ClickableTerminal
 
             var help = Special(terminal, HelpNode);
 
-            // The Interactive Terminal API answers an app's start command with the help page and loads it again when the
-            // app closes. Neither is the player going to the main menu.
+            // The Interactive Terminal API answers an app's start command with the help page and loads it again when the app closes. Neither is the player going to the main menu.
             if (!goingBack && node == help && History.Count > 0)
             {
                 // While it starts its object is in the scene but not announced yet. While it closes, it still is.
@@ -184,6 +182,13 @@ namespace ClickableTerminal
                     Click = Window.Close
                 });
                 Window.Show(window);
+                return;
+            }
+
+            if (fromOurs && view.Generic && !view.Question && LguContracts.Owns(terminal.screenText.text))
+            {
+                LguContracts.Show(terminal, terminal.screenText.text);
+                Rebuild(terminal);
                 return;
             }
 
@@ -452,12 +457,6 @@ namespace ClickableTerminal
                 var entries = parsed.FindAll(KnownCommands.IsVanillaMain);
 
                 var advertised = parsed.FindAll(entry => !KnownCommands.IsVanillaMain(entry) && !KnownCommands.IsHidden(entry.Command ?? entry.Prefill));
-                Func<MenuPage> extras = () => ExtrasPage.Build(terminal);
-                if (entries.Count > 0 && Settings.Extras.Value == ExtrasPlace.OwnPage)
-                {
-                    entries.Add(new MenuEntry { Label = "EXTRAS", Description = "To see some extra commands.", Open = extras });
-                }
-
                 Func<MenuPage> mods = () => ModsPage(terminal, advertised);
                 if (entries.Count > 0 && Try(mods) != null)
                 {
@@ -498,8 +497,7 @@ namespace ClickableTerminal
                 }
             }
 
-            // A page that takes no answer is not a question, whatever it is marked as. A mod can also put its refusal on
-            // the question's page.
+            // A page that takes no answer is not a question, whatever it is marked as. A mod can also put its refusal on the question's page.
             var asked = terminal.screenText.text;
             if (answers.Count > 0 && answers.Exists(answer => asked.IndexOf(answer, StringComparison.OrdinalIgnoreCase) >= 0))
             {
@@ -514,14 +512,14 @@ namespace ClickableTerminal
 
             if (view.Builder == null && (SellMyScrapPages.Claim(terminal, view, terminal.screenText.text, ReturnTitle())
                                          || ScrapBankPages.Claim(terminal, view, terminal.screenText.text, Submitted, ReturnTitle())
-                                         || WeatherForecast.Claim(terminal, view, terminal.screenText.text)))
+                                         || WeatherForecast.Claim(terminal, view, terminal.screenText.text)
+                                         || Contracts.Claim(terminal, view, terminal.screenText.text)))
             {
                 view.Page = Try(view.Builder);
                 return view;
             }
 
-            // A mod asking without the game's own mechanism reads the answer itself. The mark alone is not enough: a
-            // refusal in a question's place carries it too.
+            // A mod asking without the game's own mechanism reads the answer itself. The mark alone is not enough: a refusal in a question's place carries it too.
             if (view.Builder == null && (ResultPages.AsksToConfirm(asked)
                                          || (node.isConfirmationNode && asked.IndexOf("confirm", StringComparison.OrdinalIgnoreCase) >= 0)))
             {
@@ -696,9 +694,9 @@ namespace ClickableTerminal
                 entry.Label = System.Text.RegularExpressions.Regex.Replace(entry.Label, @"\s*\[[^\]]*\]", "").Trim();
             }
 
-            if (Settings.Extras.Value == ExtrasPlace.OtherPage)
+            if (Settings.Monsters.Value != MonsterDetail.Off)
             {
-                page.Entries.AddRange(ExtrasPage.Entries(terminal));
+                page.Entries.Add(new MenuEntry { Label = "MONSTER SCAN", Description = "What is alive on this moon right now.", Open = MonstersPage.Build });
             }
 
             page.Subtitle = "Ship and crew commands";
@@ -800,7 +798,7 @@ namespace ClickableTerminal
         {
             page.Extra = () => StatusPanel.Build(terminal);
 
-            page.LivePanels = Settings.Extras.Value == ExtrasPlace.StatusPanel;
+            page.LivePanels = Settings.ShipControls.Value;
             return page.Sized(0.8f, 0.7f, 0.9f);
         }
 

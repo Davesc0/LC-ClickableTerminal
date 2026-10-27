@@ -67,8 +67,7 @@ namespace ClickableTerminal
                         catalog.infoNodes[pair.noun] = node;
                     }
 
-                    // Football's bestiary page carries vehicle index 0 (the Cruiser), so info, creature and log pages
-                    // never count as purchases.
+                    // Football's bestiary page carries vehicle index 0 (the Cruiser), so info, creature and log pages never count as purchases.
                     if (verb.word != "info" && node.creatureFileID < 0 && node.storyLogFileID < 0)
                     {
                         Put(catalog.Items, node.buyItemIndex, target, isDefault);

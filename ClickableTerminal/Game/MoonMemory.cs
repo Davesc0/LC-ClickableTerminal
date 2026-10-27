@@ -1,53 +1,90 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using BepInEx;
-using BepInEx.Configuration;
 
 namespace ClickableTerminal
 {
-    // The game only knows where the ship is now, so visited moons are kept in a file of our own.
+    // The game only knows where the ship is now, so the moons flown to are kept in the save itself, the way GeneralImprovements keeps its own: deleting the save forgets them, and a day that was not saved does not count. Only the host writes the save, so a client remembers them until it leaves the lobby.
     internal static class MoonMemory
     {
-        private const string Flown = "FlownTo";
-        private const string Landed = "LandedOn";
+        private const string Key = "ClickableTerminal_FlownTo";
+        private static readonly HashSet<string> Flown = new HashSet<string>();
+        private static string loadedFor;
 
-        private static ConfigFile file;
+        private static bool Wanted => Settings.ShowHiddenMoons.Value == ShowHidden.AfterOrbit || Settings.ShowHiddenMoons.Value == ShowHidden.Mystery;
 
         internal static void RememberFlight(SelectableLevel level)
         {
-            Remember(Flown, level);
-        }
-
-        internal static void RememberLanding(SelectableLevel level)
-        {
-            Remember(Flown, level);
-            Remember(Landed, level);
-        }
-
-        internal static bool HasFlownTo(SelectableLevel level)
-        {
-            return Knows(Flown, level);
-        }
-
-        private static void Remember(string list, SelectableLevel level)
-        {
-            var entry = Entry(list);
-            if (entry == null || level == null || Knows(list, level))
+            if (!Wanted || level == null)
             {
                 return;
             }
 
-            var names = Split(entry.Value);
-            names.Add(KeyOf(level));
-            entry.Value = string.Join(", ", names);
+            Load();
+            Flown.Add(KeyOf(level));
         }
 
-        private static bool Knows(string list, SelectableLevel level)
+        internal static bool HasFlownTo(SelectableLevel level)
         {
-            var entry = Entry(list);
-            return entry != null && level != null && Split(entry.Value).Contains(KeyOf(level));
+            Load();
+            return level != null && Flown.Contains(KeyOf(level));
+        }
+
+        internal static void Save()
+        {
+            var save = SaveName();
+            if (!Wanted || !Hosting() || save == null)
+            {
+                return;
+            }
+
+            Load();
+            try
+            {
+                ES3.Save(Key, string.Join(",", Flown), save);
+            }
+            catch (Exception error)
+            {
+                Plugin.mlg.LogWarning("Could not save the moons flown to: " + error.Message);
+            }
+        }
+
+        // A new lobby starts from the save again.
+        internal static void Forget()
+        {
+            Flown.Clear();
+            loadedFor = null;
+        }
+
+        private static void Load()
+        {
+            var save = SaveName();
+            var key = Hosting() ? save : "client";
+            if (key == null || key == loadedFor)
+            {
+                return;
+            }
+
+            loadedFor = key;
+            Flown.Clear();
+            if (!Hosting())
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (var name in ES3.Load(Key, save, "").Split(','))
+                {
+                    if (name.Trim().Length > 0)
+                    {
+                        Flown.Add(name.Trim());
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                Plugin.mlg.LogWarning("Could not read the moons flown to: " + error.Message);
+            }
         }
 
         private static string KeyOf(SelectableLevel level)
@@ -55,25 +92,15 @@ namespace ClickableTerminal
             return Commands.Normalize(MoonsPage.NameOf(level));
         }
 
-        private static ConfigEntry<string> Entry(string list)
+        private static string SaveName()
         {
             var save = GameNetworkManager.Instance != null ? GameNetworkManager.Instance.currentSaveFileName : null;
-            if (string.IsNullOrEmpty(save))
-            {
-                return null;
-            }
-
-            if (file == null)
-            {
-                file = new ConfigFile(Path.Combine(Paths.ConfigPath, "ClickableTerminal.moons.cfg"), true);
-            }
-
-            return file.Bind(save, list, "", "Kept by ClickableTerminal for ShowHiddenMoons. Clear the line to forget.");
+            return string.IsNullOrEmpty(save) ? null : save;
         }
 
-        private static List<string> Split(string value)
+        private static bool Hosting()
         {
-            return (value ?? "").Split(',').Select(part => part.Trim()).Where(part => part.Length > 0).ToList();
+            return GameNetworkManager.Instance != null && GameNetworkManager.Instance.isHostingGame;
         }
     }
 }

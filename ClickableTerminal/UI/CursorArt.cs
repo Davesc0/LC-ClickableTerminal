@@ -99,8 +99,7 @@ namespace ClickableTerminal
 
         private static Texture2D Draw(string[] rows)
         {
-            // Each pixel becomes an 8x8 block with an empty rim, sampled smoothly. Drawn one to one, the icons lost or
-            // gained a pixel depending on where they landed.
+            // Each pixel becomes an 8x8 block with an empty rim, sampled smoothly. Drawn one to one, the icons lost or gained a pixel depending on where they landed.
             const int scale = 8;
             var columns = rows[0].Length;
             var lines = rows.Length;

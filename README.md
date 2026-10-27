@@ -26,6 +26,7 @@ If something breaks or looks off with another mod, tell me on [GitHub](https://g
 - TooMuchScrap
 - WeatherReroll
 - TooManyEmotes (emote store)
+- Contracted (contracts on the moons)
 - LethalLevelLoader and DawnLib (moon tags, authors, hidden and locked moons)
 - Code Rebirth (refused purchases)
 - WeatherRegistry (weather forecast)

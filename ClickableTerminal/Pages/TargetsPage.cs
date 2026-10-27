@@ -101,7 +101,7 @@ namespace ClickableTerminal
             }
 
             // Who can be beamed up (a player, or with some mods a radar booster) is the game's business.
-            var teleporter = Object.FindObjectsOfType<ShipTeleporter>().FirstOrDefault(each => !each.isInverseTeleporter);
+            var teleporter = Patches.ShipWatch.Teleporters.FirstOrDefault(each => each != null && !each.isInverseTeleporter);
             var ready = teleporter != null && (teleporter.buttonTrigger == null || teleporter.buttonTrigger.interactable);
             panel.Group(null).Add(new ToolButton
             {

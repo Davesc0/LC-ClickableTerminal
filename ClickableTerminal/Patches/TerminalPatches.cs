@@ -5,8 +5,7 @@ namespace ClickableTerminal.Patches
     [HarmonyPatch(typeof(Terminal))]
     internal static class TerminalPatches
     {
-        // Buying is checked against the same list the game draws for the quota, so the list itself is resized. It is
-        // drawn from the day's seed, the same for every player.
+        // Buying is checked against the same list the game draws for the quota, so the list itself is resized. It is drawn from the day's seed, the same for every player.
         [HarmonyPatch(nameof(Terminal.RotateShipDecorSelection))]
         [HarmonyPostfix]
         private static void StockDecorations(Terminal __instance)
@@ -92,7 +91,7 @@ namespace ClickableTerminal.Patches
                 return true;
             }
 
-            var send = Window.Open != null ? Window.Open.Send : Settings.OwnPages.Value ? Navigator.Current?.Page?.Send : null;
+            var send = Window.Open != null ? Window.Open.Send : TerminalMouse.PagesOn ? Navigator.Current?.Page?.Send : null;
             if (send == null)
             {
                 return true;

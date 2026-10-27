@@ -38,8 +38,7 @@ namespace ClickableTerminal
             var app = InteractiveTerminal.Application();
             var menu = InteractiveTerminal.Menu(app);
 
-            // The app rewrites its screen whenever its cursor moves. The old areas stay until the new letters are in, so
-            // a click in between still lands.
+            // The app rewrites its screen whenever its cursor moves. The old areas stay until the new letters are in, so a click in between still lands.
             if (!ReferenceEquals(menu, scannedMenu))
             {
                 screenChanged = true;
@@ -58,12 +57,12 @@ namespace ClickableTerminal
             }
         }
 
-        internal void Targets(RectTransform frame, List<Vector2> into)
+        internal void Targets(RectTransform frame, Steering steering)
         {
             foreach (var spot in spots)
             {
                 var point = new Vector2(Mathf.Lerp(spot.Area.xMin, spot.Area.xMax, 0.12f), spot.Area.center.y);
-                into.Add(frame.InverseTransformPoint(spot.Space.TransformPoint(point)));
+                steering.Add(frame, spot.Space, point, Zone.App);
             }
         }
 

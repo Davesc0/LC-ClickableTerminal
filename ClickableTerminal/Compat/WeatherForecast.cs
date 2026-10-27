@@ -89,37 +89,67 @@ namespace ClickableTerminal
             return page;
         }
 
+        // The weather on a moon now and what it does. With WeatherRegistry also what it does to the scrap, and the chances for tomorrow.
         internal static void ShowWindow(SelectableLevel level)
         {
-            var window = new Window { Title = "FORECAST: " + MoonsPage.NameOf(level).ToUpperInvariant() };
+            string Named(string weather) => Tint.Weather(weather == "None" ? "Clear" : weather, weather);
 
-            if (!Read(level, out var now, out var chances))
-            {
-                window.Text = "WeatherRegistry did not give a forecast.";
-                Window.Show(window);
-                return;
-            }
-
-            string Named(string weather) => weather == "None" ? "Clear" : weather;
-
+            var now = CurrentName(level);
             var text = new System.Text.StringBuilder();
-            text.Append("<alpha=#99>WEATHER NOW<alpha=#FF><pos=55%>").Append(Named(now)).Append("\n\n");
-            text.Append("<alpha=#99>TOMORROW<alpha=#FF>\n");
-            foreach (var chance in chances.Where(each => each.Possible && each.Percent > 0f))
+            text.Append("<alpha=#99>WEATHER NOW<alpha=#FF><pos=55%>").Append(Named(now)).Append('\n');
+            var note = WeatherNotes.For(now);
+            if (note != null)
             {
-                // Same width digits, so the numbers line up.
-                text.Append(Named(chance.Name)).Append("<pos=55%><mspace=0.6em>")
-                    .Append(chance.Percent.ToString("0.0").PadLeft(5)).Append("</mspace>%\n");
+                text.Append("<alpha=#BB>").Append(note.Text);
+                if (note.Mod != null && note.Mod != "the game")
+                {
+                    text.Append("\n<alpha=#77>From ").Append(note.Mod);
+                }
+
+                text.Append("<alpha=#FF>\n");
             }
 
-            var never = chances.Where(each => !each.Possible).Select(each => Named(each.Name)).ToList();
-            if (never.Count > 0)
+            if (level.currentWeather != LevelWeatherType.None && Multipliers(now, out var amount, out var value))
             {
-                text.Append("\n<alpha=#99>NEVER HERE<alpha=#BB>\n").Append(string.Join(", ", never));
+                text.Append("\n<alpha=#99>SCRAP AMOUNT<alpha=#FF><pos=55%>").Append(Times(amount));
+                text.Append("\n<alpha=#99>SCRAP VALUE<alpha=#FF><pos=55%>").Append(Times(value)).Append('\n');
             }
 
-            window.Text = text.ToString();
-            Window.Show(window);
+            if (Available)
+            {
+                text.Append('\n');
+                if (Read(level, out _, out var chances))
+                {
+                    text.Append("<alpha=#99>TOMORROW<alpha=#FF>\n");
+                    foreach (var chance in chances.Where(each => each.Possible && each.Percent > 0f))
+                    {
+                        // Same width digits, so the numbers line up.
+                        text.Append(Named(chance.Name)).Append("<pos=55%><mspace=0.6em>")
+                            .Append(chance.Percent.ToString("0.0").PadLeft(5)).Append("</mspace>%\n");
+                    }
+
+                    var never = chances.Where(each => !each.Possible).Select(each => Named(each.Name)).ToList();
+                    if (never.Count > 0)
+                    {
+                        text.Append("\n<alpha=#99>NEVER HERE<alpha=#BB>\n").Append(string.Join(", ", never));
+                    }
+                }
+                else
+                {
+                    text.Append("WeatherRegistry did not give a forecast.");
+                }
+            }
+
+            Window.Show(new Window
+            {
+                Title = (Available ? "FORECAST: " : "WEATHER: ") + MoonsPage.NameOf(level).ToUpperInvariant(),
+                Text = text.ToString().TrimEnd()
+            });
+        }
+
+        private static string Times(float by)
+        {
+            return "x" + by.ToString("0.##");
         }
 
         private static bool Read(SelectableLevel level, out string now, out List<Chance> chances)
@@ -195,6 +225,113 @@ namespace ClickableTerminal
                 Plugin.WarnOnce($"WeatherRegistry forecast could not be read: {(e.InnerException ?? e).Message}");
                 return false;
             }
+        }
+
+        private static Dictionary<string, Color> colours;
+        private static float coloursTried = -100f;
+
+        // The colour WeatherRegistry gives a weather, read once.
+        internal static Color? ColorOf(string name)
+        {
+            if (!Available)
+            {
+                return null;
+            }
+
+            // Before the weathers are registered there is nothing to read; asked again a few seconds later.
+            if (colours == null && Time.unscaledTime - coloursTried > 5f)
+            {
+                coloursTried = Time.unscaledTime;
+                var found = new Dictionary<string, Color>();
+                try
+                {
+                    foreach (var weather in Weathers())
+                    {
+                        var colour = weather.GetType().GetProperty("Color", AccessTools.all)?.GetValue(weather);
+                        if (colour is Color known)
+                        {
+                            found[WeatherNotes.Key(NameOf(weather))] = known;
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    Plugin.WarnOnce($"WeatherRegistry's weather colours could not be read: {(e.InnerException ?? e).Message}");
+                }
+
+                if (found.Count > 0)
+                {
+                    colours = found;
+                }
+            }
+
+            return colours == null ? null : colours.TryGetValue(WeatherNotes.Key(name), out var result) ? result : (Color?)null;
+        }
+
+        // The name WeatherRegistry has for the weather on a moon now; the game's own without it.
+        internal static string CurrentName(SelectableLevel level)
+        {
+            if (Available)
+            {
+                try
+                {
+                    var manager = Reflect.Find("WeatherRegistry.WeatherManager");
+                    var current = manager?.GetMethod("GetCurrentWeather", AccessTools.all, null, new[] { typeof(SelectableLevel) }, null)?.Invoke(null, new object[] { level });
+                    var name = current != null ? NameOf(current) : null;
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        return name;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Plugin.WarnOnce($"WeatherRegistry could not tell the weather on a moon: {(e.InnerException ?? e).Message}");
+                }
+            }
+
+            return level.currentWeather.ToString();
+        }
+
+        // WeatherRegistry's scrap multipliers for a weather.
+        internal static bool Multipliers(string name, out float amount, out float value)
+        {
+            amount = value = 1f;
+            if (!Available)
+            {
+                return false;
+            }
+
+            try
+            {
+                var key = WeatherNotes.Key(name);
+                var weather = Weathers().FirstOrDefault(each => WeatherNotes.Key(NameOf(each)) == key);
+                if (weather == null)
+                {
+                    return false;
+                }
+
+                var any = AccessTools.all;
+                amount = (float)(weather.GetType().GetProperty("ScrapAmountMultiplier", any)?.GetValue(weather) ?? 1f);
+                value = (float)(weather.GetType().GetProperty("ScrapValueMultiplier", any)?.GetValue(weather) ?? 1f);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Plugin.WarnOnce($"WeatherRegistry's numbers for a weather could not be read: {(e.InnerException ?? e).Message}");
+                return false;
+            }
+        }
+
+        private static IEnumerable<object> Weathers()
+        {
+            var manager = Reflect.Find("WeatherRegistry.WeatherManager");
+            var all = manager?.GetMethod("GetWeathers", AccessTools.all)?.Invoke(null, null) as IEnumerable;
+            return all != null ? all.Cast<object>().ToList() : new List<object>();
+        }
+
+        private static string NameOf(object weather)
+        {
+            return weather.GetType().GetProperty("Name", AccessTools.all)?.GetValue(weather) as string;
         }
 
         private static void Space(MenuPage page)

@@ -5,8 +5,7 @@ using HarmonyLib;
 
 namespace ClickableTerminal
 {
-    // The game checks orders against a hard 12 and mods that raise it rewrite that number, so it is read from the check
-    // itself.
+    // The game checks orders against a hard 12 and mods that raise it rewrite that number, so it is read from the check itself.
     internal static class DropshipLimit
     {
         private const int Vanilla = 12;

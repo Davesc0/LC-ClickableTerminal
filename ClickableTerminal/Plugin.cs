@@ -9,7 +9,7 @@ namespace ClickableTerminal
     {
         public const string modGUID = "dev.davesco.ClickableTerminal";
         public const string modName = "ClickableTerminal";
-        public const string modVersion = "0.1.0";
+        public const string modVersion = "0.2.0";
         internal static readonly Harmony _harmony = new Harmony(modGUID);
         internal static ManualLogSource mlg = BepInEx.Logging.Logger.CreateLogSource(modGUID);
 

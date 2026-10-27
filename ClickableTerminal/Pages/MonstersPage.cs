@@ -17,17 +17,18 @@ namespace ClickableTerminal
 
             var page = new MenuPage
             {
-                Title = "MONSTERS",
+                Title = "MONSTER SCAN",
                 Scale = 0.85f,
                 ScaleMin = 0.7f,
                 ScaleMax = 1f,
-                Corner = new ToolButton { Label = "COUNT AGAIN", Click = () => Navigator.Rebuild(terminal) },
                 SortBy = column =>
                 {
                     State.SortBy(column);
                     Navigator.Rebuild(terminal);
                 }
             };
+
+            page.Corners.Add(new ToolButton { Label = "COUNT AGAIN", Click = () => Navigator.Rebuild(terminal) });
 
             if (round == null || round.inShipPhase || spawned == null)
             {

@@ -118,7 +118,8 @@ namespace ClickableTerminal
                 {
                     "lategame", "lgu", "lategame store", "lgc", "contracts", "contract", "contract info",
                     "trade", "trade player credits", "lgu trade", "convert", "pc",
-                    "interns", "intern", "atk", "initattack", "cd", "cooldown", "extend deadline", "probe"
+                    "interns", "intern", "atk", "initattack", "cd", "cooldown", "extend deadline", "probe",
+                    "demon", "lookup", "bruteforce"
                 },
                 OnlyIfRegistered = new[] { "lgu", "contracts", "trade", "convert", "extend deadline", "probe" },
                 Entries = new[]
@@ -132,6 +133,9 @@ namespace ClickableTerminal
                     new MenuEntry { Label = "CONVERT CREDITS", Command = "convert", Description = "Change company credits into player credits and back." },
                     new MenuEntry { Label = "STUN ATTACK", Command = "atk", Description = "Stun nearby enemies. Needs the Discombobulator." },
                     new MenuEntry { Label = "STUN COOLDOWN", Command = "cd", Description = "How long until the stun can be used again." },
+                    new MenuEntry { Label = "EXORCISM", Click = () => LguContracts.Exorcism(TheTerminal()), Description = "Contract: what the spirit at the pentagram needs to be banished." },
+                    new MenuEntry { Label = "DEFUSAL", Click = () => LguContracts.Defusal(TheTerminal()), Description = "Contract: the bomb's serial number in, the wire order out." },
+                    new MenuEntry { Label = "DATA RETRIEVAL", Click = () => LguContracts.DataRetrieval(TheTerminal()), Description = "Contract: the laptop's IP address in, then log in on the laptop." },
                     new MenuEntry { Label = "ABOUT", Command = "lategame", Description = "What the mod has to say about itself." }
                 }
             },
@@ -280,6 +284,28 @@ namespace ClickableTerminal
                         Click = () => Answers.Typed(TheTerminal(), "DELETE CASSETTE", "Type the ID of the cassette to delete, then Enter.", "delete ", "DELETE", 20)
                     },
                     new MenuEntry { Label = "TRANSFER", Command = "transfer", Description = "Move what is playing onto the ship's monitor, where that is possible." }
+                }
+            },
+            new Group
+            {
+                Plugin = "com.y4ngz.company",
+                Title = "CONTRACTED",
+                Description = "The contract on every moon, and Field Support for the Defuse contract.",
+                Claims = new[] { "contractlist", "defuse", "fieldsupport", "field support" },
+                Entries = new[]
+                {
+                    new MenuEntry
+                    {
+                        Label = "CONTRACT LIST",
+                        Open = () => Contracts.Page(UnityEngine.Object.FindObjectOfType<Terminal>()),
+                        Description = "Every moon with its contract. MOONS shows them too."
+                    },
+                    new MenuEntry
+                    {
+                        Label = "FIELD SUPPORT",
+                        Click = () => FieldSupport.Show(UnityEngine.Object.FindObjectOfType<Terminal>()),
+                        Description = "Contracted's own Defuse: what the crew sees on the briefcase in, the cut order and code out. Contracted uses LGU's Defusal instead while LGU is installed."
+                    }
                 }
             },
             new Group

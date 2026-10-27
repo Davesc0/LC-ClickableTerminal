@@ -9,8 +9,8 @@ namespace ClickableTerminal
         private const string Header = "[TooManyEmotes]";
 
         private static readonly Regex Tags = new Regex("<[^>]+>", RegexOptions.Compiled);
-        private static readonly Regex Entry = new Regex(@"^\s*\*\s*(.+?)\s*//\s*(.+?)\s*$", RegexOptions.Compiled);
-        private static readonly Regex Balance = new Regex(@"^Remaining (.+?) balance:\s*(.+?)\.?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        internal static readonly Regex Entry = new Regex(@"^\s*\*\s*(.+?)\s*//\s*(.+?)\s*$", RegexOptions.Compiled);
+        internal static readonly Regex Balance = new Regex(@"^Remaining (.+?) balance:\s*(.+?)\.?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         internal static bool IsStore(string printed)
         {

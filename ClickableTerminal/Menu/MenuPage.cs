@@ -186,6 +186,9 @@ namespace ClickableTerminal
 
         // Only the label, no frame, not clickable.
         internal bool Bare;
+
+        // In a panel: buttons with the same row share one line, whatever fits (the ship's controls).
+        internal int Row;
         internal Action Click;
     }
 
@@ -213,7 +216,8 @@ namespace ClickableTerminal
         internal UnityEngine.Camera Camera;
         internal bool LivePanels;
         internal Action<string> Send;
-        internal ToolButton Corner;
+        // Buttons on the summary's line, above the panels (the moons' RANDOM and SETTINGS), side by side.
+        internal readonly List<ToolButton> Corners = new List<ToolButton>();
         internal bool SelectRows;
         internal MenuEntry Pick;
 

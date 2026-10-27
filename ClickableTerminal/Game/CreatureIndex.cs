@@ -17,8 +17,7 @@ namespace ClickableTerminal
             return byScanId != null && byScanId.TryGetValue(creatureFileId, out var enemy) ? enemy : null;
         }
 
-        // Some creatures are never scanned as themselves (the cadaver grows out of an infected player), so the name is
-        // the fallback.
+        // Some creatures are never scanned as themselves (the cadaver grows out of an infected player), so the name is the fallback.
         internal static EnemyType Find(TerminalNode file)
         {
             var enemy = Find(file.creatureFileID);

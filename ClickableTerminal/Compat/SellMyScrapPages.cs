@@ -11,22 +11,21 @@ namespace ClickableTerminal
         private const string Guid = "com.github.zehsteam.SellMyScrap";
 
         private static readonly Regex Tags = new Regex("<[^>]+>", RegexOptions.Compiled);
-        private static readonly Regex Found = new Regex(@"^Found (\d+) items? with a total value of \$(-?\d+)", RegexOptions.Compiled);
-        private static readonly Regex Catalogue = new Regex(@"^Found (\d+) total items from all moons\. \(Page (\d+) / (\d+)\)", RegexOptions.Compiled);
-        private static readonly Regex Quota = new Regex(@"^Quota fulfilled: (\$-?\d+ / \$-?\d+)(?: \(Need: (\$-?\d+)\))?", RegexOptions.Compiled);
+        internal static readonly Regex Found = new Regex(@"^Found (\d+) items? with a total value of \$(-?\d+)", RegexOptions.Compiled);
+        internal static readonly Regex Catalogue = new Regex(@"^Found (\d+) total items from all moons\. \(Page (\d+) / (\d+)\)", RegexOptions.Compiled);
+        internal static readonly Regex Quota = new Regex(@"^Quota fulfilled: (\$-?\d+ / \$-?\d+)(?: \(Need: (\$-?\d+)\))?", RegexOptions.Compiled);
         private static readonly Regex Overtime = new Regex(@"^Overtime bonus: (\$-?\d+)", RegexOptions.Compiled);
         private static readonly Regex Rate = new Regex(@"buying at %(\d+)", RegexOptions.Compiled);
         private static readonly Regex Asks = new Regex(@"\bCONFIRM or DENY\b", RegexOptions.Compiled);
 
         // "Bell (x2) : $127" and "Bell (x2) $127 (Vehicle)"
-        private static readonly Regex Item = new Regex(@"^(.+?)\s*\(x(\d+)\)\s*:?\s*(\$-?\d+)\s*(\(\w+\))?$", RegexOptions.Compiled);
+        internal static readonly Regex Item = new Regex(@"^(.+?)\s*\(x(\d+)\)\s*:?\s*(\$-?\d+)\s*(\(\w+\))?$", RegexOptions.Compiled);
         private static readonly Regex Gap = new Regex(@"\s{2,}", RegexOptions.Compiled);
 
         private static readonly PageState State = new PageState();
         private static readonly PageState ItemState = new PageState();
 
-        // ScrapBank grabs everything that starts with "sell". SellMyScrap also takes its commands with a dash, which
-        // ScrapBank leaves alone.
+        // ScrapBank grabs everything that starts with "sell". SellMyScrap also takes its commands with a dash, which ScrapBank leaves alone.
         private static string Spelled(string command, string dashed)
         {
             return Chainloader.PluginInfos.ContainsKey("GJ.ScrapBank") ? dashed : command;
@@ -249,8 +248,7 @@ namespace ClickableTerminal
             }
         }
 
-        // While the mod waits for an answer it takes everything typed, even after its page is gone, so its questions get
-        // answered.
+        // While the mod waits for an answer it takes everything typed, even after its page is gone, so its questions get answered.
         internal static bool Claim(Terminal terminal, View view, string printed, string back)
         {
             if (!Chainloader.PluginInfos.ContainsKey(Guid))

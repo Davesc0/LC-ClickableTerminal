@@ -5,16 +5,14 @@ using System.Reflection;
 
 namespace ClickableTerminal
 {
-    // The way Terminal Restyle does it: vanilla item class first, then words in the names, then the script's field
-    // names.
+    // The way Terminal Restyle does it: vanilla item class first, then words in the names, then the script's field names.
     internal static class ItemCategories
     {
         internal const string Other = "OTHER";
 
         internal const int Slots = 15;
 
-        // The rules that look at an item's code are tied to the slot, so a renamed category keeps them and an emptied
-        // one drops them.
+        // The rules that look at an item's code are tied to the slot, so a renamed category keeps them and an emptied one drops them.
         private static readonly string[] Builtin =
         {
             "LIGHTING", "MELEE", "FIREARMS", "TOOL GUNS", "AMMO", "TACTICAL", "HAZARD CONTROL",
@@ -91,7 +89,30 @@ namespace ClickableTerminal
         internal static IEnumerable<string> Order()
         {
             ReadConfig();
-            return names.Where(name => name.Length > 0).Distinct().Concat(new[] { Other });
+            return SlotOrder().Select(slot => names[slot]).Where(name => name.Length > 0).Distinct().Concat(new[] { Other });
+        }
+
+        // The slots in the order the store lists them: CategoryOrder first (slot numbers from 1), then any slot it leaves out. The order is kept apart from the slots, because the rules that look at an item's code belong to a slot.
+        internal static List<int> SlotOrder()
+        {
+            var order = new List<int>();
+            foreach (var part in (Settings.CategoryOrder?.Value ?? "").Split(','))
+            {
+                if (int.TryParse(part.Trim(), out var number) && number >= 1 && number <= Slots && !order.Contains(number - 1))
+                {
+                    order.Add(number - 1);
+                }
+            }
+
+            for (var slot = 0; slot < Slots; slot++)
+            {
+                if (!order.Contains(slot))
+                {
+                    order.Add(slot);
+                }
+            }
+
+            return order;
         }
 
         private static string Named(string builtin)

@@ -13,7 +13,6 @@ namespace ClickableTerminal
         private const string Tag = "tag:";
 
         private static readonly Regex LeadingNumber = new Regex(@"^\s*\d+\s*", RegexOptions.Compiled);
-        private static readonly Regex Grade = new Regex(@"^(F|D|C|B|A|S+)([+\-]*)$", RegexOptions.Compiled);
         private static readonly PageState State = new PageState();
         private static bool pickCompany;
 
@@ -102,15 +101,25 @@ namespace ClickableTerminal
             // Some moons write a whole sentence where the risk grade goes.
             page.Columns.Add(new Column { Header = State.HeaderFor("RISK", 1), Chars = 6, MaxChars = 9 });
             page.Columns.Add(new Column { Header = State.HeaderFor("WEATHER", 2), Chars = 9 });
-            page.Columns.Add(new Column { Header = State.HeaderFor("PRICE", 3), Chars = 7, AlignRight = true });
+            if (Contracts.Available)
+            {
+                page.Columns.Add(new Column { Header = State.HeaderFor("CONTRACT", 3), Chars = 9, MaxChars = 12 });
+            }
+
+            page.Columns.Add(new Column { Header = State.HeaderFor("PRICE", page.Columns.Count), Chars = 7, AlignRight = true });
 
             var on = wanted.Count + (State.Has(Affordable) ? 1 : 0) + (State.Has(ClearSky) ? 1 : 0);
-            page.Corner = new ToolButton
+            if (Settings.RandomMoon.Value)
+            {
+                page.Corners.Add(new ToolButton { Label = "RANDOM", Click = () => RandomWindow(terminal) });
+            }
+
+            page.Corners.Add(new ToolButton
             {
                 Label = on > 0 ? $"SETTINGS ({on})" : "SETTINGS",
                 Active = on > 0,
                 Click = () => SettingsWindow(terminal)
-            };
+            });
 
             page.Summary = $"The Company is buying at {Mathf.RoundToInt(round.companyBuyingRate * 100f)}%";
 
@@ -166,8 +175,7 @@ namespace ClickableTerminal
             return page;
         }
 
-        // With TooManyMoons the day's draw is a section of its own, and the moons that mod keeps open beside it follow
-        // under their authors, whatever the setting says.
+        // With TooManyMoons the day's draw is a section of its own, and the moons that mod keeps open beside it follow under their authors, whatever the setting says.
         private static void AddRows(MenuPage page, List<KeyValuePair<SelectableLevel, MenuEntry>> rows, MoonData data)
         {
             var apart = data.Rotating && rows.Any(row => data.Drawn.Contains(row.Key)) && rows.Any(row => !data.Drawn.Contains(row.Key));
@@ -209,7 +217,7 @@ namespace ClickableTerminal
             };
 
             detail.Facts.Add(new Fact { Label = "Risk", Value = string.IsNullOrEmpty(level.riskLevel) ? "-" : level.riskLevel });
-            detail.Facts.Add(new Fact { Label = "Weather", Value = level.currentWeather == LevelWeatherType.None ? "Clear" : level.currentWeather.ToString() });
+            detail.Facts.Add(new Fact { Label = "Weather", Value = Tint.Weather(level.currentWeather) });
             detail.Facts.Add(new Fact { Label = "Route cost", Value = here ? "You are here" : route.Price > 0 ? "$" + route.Price : "FREE" });
 
             if (data.Locked.Contains(level))
@@ -233,9 +241,17 @@ namespace ClickableTerminal
                 detail.Buttons.Add(new ToolButton { Label = "INFO", Click = () => Window.ShowPage(terminal, NameOf(level).ToUpperInvariant(), info) });
             }
 
-            if (HasForecast(level))
+            var contract = Contracts.For(level);
+            if (contract != null)
             {
-                detail.Buttons.Add(new ToolButton { Label = "FORECAST", Click = () => WeatherForecast.ShowWindow(level) });
+                detail.Facts.Add(new Fact { Label = "Contract", Value = Contracts.Tinted(contract.Name) });
+                detail.Buttons.Add(new ToolButton { Label = "CONTRACT", Click = () => Contracts.ShowWindow(level) });
+            }
+
+            // Without WeatherRegistry there is no forecast, only what today's weather does.
+            if (WeatherForecast.Available || level.currentWeather != LevelWeatherType.None)
+            {
+                detail.Buttons.Add(new ToolButton { Label = WeatherForecast.Available ? "FORECAST" : "WEATHER", Click = () => WeatherForecast.ShowWindow(level) });
             }
 
             if (simulate)
@@ -244,7 +260,7 @@ namespace ClickableTerminal
                 detail.Buttons.Add(new ToolButton
                 {
                     Label = "SIMULATE",
-                    Click = () => Window.Show(new Window { Title = "SIMULATE: " + name.ToUpperInvariant(), Text = Simulation(Commands.Ask(terminal, "simulate " + name), name) })
+                    Click = () => Window.Show(new Window { Title = "SIMULATE: " + name.ToUpperInvariant(), Text = MoonText.Simulation(Commands.Ask(terminal, "simulate " + name), name) })
                 });
             }
 
@@ -281,24 +297,6 @@ namespace ClickableTerminal
             var answer = Commands.Act(terminal, route.Confirm, 1);
             Navigator.Rebuild(terminal);
             Window.Show(new Window { Title = "ROUTE: " + NameOf(level).ToUpperInvariant(), Text = answer });
-        }
-
-        private static readonly Regex Chance = new Regex(@"^\*?\s*(.+?)\s*//\s*Chance:\s*(\S+)", RegexOptions.Compiled);
-
-        // "* Name // Chance: 12.3%"
-        private static string Simulation(string printed, string name)
-        {
-            var lines = Window.Tidy(printed, name).Split('\n').Select(line =>
-            {
-                var match = Chance.Match(System.Text.RegularExpressions.Regex.Replace(line, "<[^>]*>", "").Trim());
-                return match.Success ? "  " + match.Groups[1].Value + "<pos=72%>" + match.Groups[2].Value : line;
-            });
-            return string.Join("\n", lines);
-        }
-
-        private static bool HasForecast(SelectableLevel level)
-        {
-            return WeatherForecast.Available && level.randomWeathers != null && level.randomWeathers.Length > 0;
         }
 
         private static bool IsCompany(SelectableLevel level, Target route)
@@ -380,7 +378,7 @@ namespace ClickableTerminal
                 Texture = MoonPicture.For(level),
                 NoPicture = level.videoReel == null,
                 Side = "<alpha=#99>RISK<alpha=#FF><pos=50%>" + (string.IsNullOrEmpty(level.riskLevel) ? "-" : level.riskLevel)
-                       + "\n<alpha=#99>WEATHER<alpha=#FF><pos=50%>" + (level.currentWeather == LevelWeatherType.None ? "Clear" : level.currentWeather.ToString())
+                       + "\n<alpha=#99>WEATHER<alpha=#FF><pos=50%>" + Tint.Weather(level.currentWeather)
                        + "\n<alpha=#99>ROUTE COST<alpha=#FF><pos=50%>" + (route.Price > 0 ? "$" + route.Price : "FREE")
                        + (route.Price > 0 ? "\n<alpha=#99>CREDITS AFTER<alpha=#FF><pos=50%>$" + (terminal.groupCredits - route.Price) : "")
             };
@@ -457,6 +455,10 @@ namespace ClickableTerminal
             var locked = data.Locked.Contains(level);
             var weather = level.currentWeather == LevelWeatherType.None ? "" : level.currentWeather.ToString();
             var risk = string.IsNullOrEmpty(level.riskLevel) ? "-" : level.riskLevel;
+            var shownWeather = weather.Length > 0 ? Tint.Weather(level.currentWeather) : "";
+
+            // With Contracted every moon but the Company's has one; the Company's row keeps the column empty.
+            var contract = Contracts.Available ? Contracts.For(level) ?? new Contracts.Contract { Short = "" } : null;
 
             return new MenuEntry
             {
@@ -465,8 +467,12 @@ namespace ClickableTerminal
                 Command = route.Command,
                 AltClick = catalog.InfoNode(route) != null ? () => Window.ShowPage(terminal, name.ToUpperInvariant(), catalog.InfoNode(route)) : (System.Action)null,
                 Dim = locked || (!here && route.Price > terminal.groupCredits),
-                Cells = new[] { risk, weather, "$" + route.Price },
-                Keys = new IComparable[] { name, RiskRank(level.riskLevel), weather, route.Price }
+                Cells = contract == null
+                    ? new[] { risk, shownWeather, "$" + route.Price }
+                    : new[] { risk, shownWeather, Contracts.Tinted(contract.Short), "$" + route.Price },
+                Keys = contract == null
+                    ? new IComparable[] { name, MoonText.RiskRank(level.riskLevel), weather, route.Price }
+                    : new IComparable[] { name, MoonText.RiskRank(level.riskLevel), weather, contract.Short, route.Price }
             };
         }
 
@@ -484,8 +490,7 @@ namespace ClickableTerminal
             }
         }
 
-        // Mystery: a hidden moon nobody has flown to shows as ??? and cannot be clicked. Its name has to be typed, as
-        // without this mod.
+        // Mystery: a hidden moon nobody has flown to shows as ??? and cannot be clicked. Its name has to be typed, as without this mod.
         private static readonly HashSet<SelectableLevel> Mysteries = new HashSet<SelectableLevel>();
 
         private static MenuEntry MysteryRow()
@@ -495,8 +500,10 @@ namespace ClickableTerminal
                 Label = "???",
                 Dim = true,
                 Click = () => { },
-                Cells = new[] { "?", "?", "?" },
-                Keys = new IComparable[] { "\uffff", int.MaxValue, "\uffff", int.MaxValue }
+                Cells = Contracts.Available ? new[] { "?", "?", "?", "?" } : new[] { "?", "?", "?" },
+                Keys = Contracts.Available
+                    ? new IComparable[] { "\uffff", int.MaxValue, "\uffff", "\uffff", int.MaxValue }
+                    : new IComparable[] { "\uffff", int.MaxValue, "\uffff", int.MaxValue }
             };
         }
 
@@ -522,34 +529,6 @@ namespace ClickableTerminal
             var name = level.PlanetName ?? "";
             var stripped = LeadingNumber.Replace(name, "");
             return stripped.Length > 0 ? stripped : name;
-        }
-
-        // "Safe" first, then F up to S. Every + or - is a step, so S < S+ < S++, and modded grades like SS come after.
-        // Anything unreadable sorts last.
-        private static int RiskRank(string risk)
-        {
-            var grade = (risk ?? "").Trim().ToUpperInvariant();
-            if (grade == "SAFE")
-            {
-                return -1;
-            }
-
-            var match = Grade.Match(grade);
-            if (!match.Success)
-            {
-                return int.MaxValue;
-            }
-
-            var letters = match.Groups[1].Value;
-            var signs = match.Groups[2].Value;
-            var steps = 0;
-
-            foreach (var sign in signs)
-            {
-                steps += sign == '+' ? 1 : -1;
-            }
-
-            return "FDCBAS".IndexOf(letters[0]) * 10000 + (letters.Length - 1) * 1000 + 500 + steps;
         }
     }
 }

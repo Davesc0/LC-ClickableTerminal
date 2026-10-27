@@ -93,6 +93,8 @@ namespace ClickableTerminal
                 });
             }
 
+            page.Corners.Add(new ToolButton { Label = "SETTINGS", Click = () => Navigator.Open(() => StoreSettings.Build(terminal)) });
+
             if (hasSaved)
             {
                 page.Sidebar.Add(new MenuEntry
@@ -177,9 +179,11 @@ namespace ClickableTerminal
             if (facts.IsItem)
             {
                 var item = facts.Item;
+                // ADD and REMOVE side by side, REMOVE greyed out while there is none in the cart, so the buttons never move.
                 detail.Buttons.Add(new ToolButton
                 {
-                    Label = Cart.Of(item) > 0 ? $"ADD TO CART ({Cart.Of(item)})" : "ADD TO CART",
+                    Label = Cart.Of(item) > 0 ? $"ADD ({Cart.Of(item)})" : "ADD",
+                    Row = 1,
                     Off = !Cart.CanAdd(terminal, item),
                     Click = () =>
                     {
@@ -187,29 +191,28 @@ namespace ClickableTerminal
                         Navigator.Rebuild(terminal);
                     }
                 });
-                if (Cart.Of(item) > 0)
+                detail.Buttons.Add(new ToolButton
                 {
-                    detail.Buttons.Add(new ToolButton
+                    Label = "REMOVE",
+                    Row = 1,
+                    Off = Cart.Of(item) == 0,
+                    Click = () =>
                     {
-                        Label = "REMOVE",
-                        Click = () =>
-                        {
-                            Cart.Remove(item);
-                            Navigator.Rebuild(terminal);
-                        }
-                    });
-                }
+                        Cart.Remove(item);
+                        Navigator.Rebuild(terminal);
+                    }
+                });
 
-                detail.Buttons.Add(new ToolButton { Label = "BUY NOW", Click = () => AskToBuy(terminal, facts) });
+                detail.Buttons.Add(new ToolButton { Label = "BUY NOW", Row = 2, Click = () => AskToBuy(terminal, facts) });
             }
             else
             {
-                detail.Buttons.Add(new ToolButton { Label = "BUY", Click = () => AskToBuy(terminal, facts) });
+                detail.Buttons.Add(new ToolButton { Label = "BUY", Row = 2, Click = () => AskToBuy(terminal, facts) });
             }
 
             if (facts.Info != null)
             {
-                detail.Buttons.Add(new ToolButton { Label = "INFO", Click = () => Window.ShowPage(terminal, facts.Name.ToUpperInvariant(), facts.Info) });
+                detail.Buttons.Add(new ToolButton { Label = "INFO", Row = 3, Click = () => Window.ShowPage(terminal, facts.Name.ToUpperInvariant(), facts.Info) });
             }
 
             detail.Facts.Add(new Fact { Label = "Type", Value = facts.Kind });
@@ -490,18 +493,13 @@ namespace ClickableTerminal
 
         private static Detail CartPanel(Terminal terminal)
         {
-            var items = terminal.buyableItemsList;
             var panel = new Detail { Title = "CART" };
 
             if (Cart.Count == 0)
             {
-                panel.Text = "Empty. ADD TO CART puts the picked item here.";
+                panel.Text = "Empty. ADD puts the picked item here.";
                 return panel;
             }
-
-            var lines = Cart.Lines.ToList();
-            panel.Text = string.Join("\n", lines.Take(3).Select(line => $"{line.Value}x {items[line.Key].itemName}"))
-                         + (lines.Count > 3 ? $"\n+{lines.Count - 3} more" : "");
 
             var total = Cart.Total(terminal);
             panel.Facts.Add(new Fact { Label = "Items", Value = $"{Cart.Count + terminal.numberOfItemsInDropship} / {DropshipLimit.Value}" });
@@ -536,8 +534,7 @@ namespace ClickableTerminal
             return count;
         }
 
-        // Rows named "Family - Name" in the game's order become a family line with the members under it. Sorted by a
-        // column, every row keeps its full name.
+        // Rows named "Family - Name" in the game's order become a family line with the members under it. Sorted by a column, every row keeps its full name.
         private static List<MenuEntry> Family(List<MenuEntry> rows)
         {
             if (State.SortColumn >= 0)
@@ -597,6 +594,24 @@ namespace ClickableTerminal
         {
             return new HashSet<string>(
                 Settings.HiddenStoreCategories.Value.Split(',').Select(name => name.Trim().ToUpperInvariant()).Where(name => name.Length > 0));
+        }
+
+        private static bool showHidden;
+
+        // Every tab the store shows and every item in it, the hidden ones too, for the SETTINGS page.
+        internal static List<KeyValuePair<string, List<MenuEntry>>> AllSections(Terminal terminal)
+        {
+            showHidden = true;
+            try
+            {
+                var hidden = Hidden();
+                return Sections(terminal).Where(section => section.Rows.Count > 0 && !hidden.Contains(section.Title) && !hidden.Contains(section.Group))
+                    .Select(section => new KeyValuePair<string, List<MenuEntry>>(section.Title, section.Rows)).ToList();
+            }
+            finally
+            {
+                showHidden = false;
+            }
         }
 
         private static List<Section> Sections(Terminal terminal)
@@ -783,8 +798,29 @@ namespace ClickableTerminal
             }
         }
 
+        private static HashSet<string> hiddenItems;
+        private static string hiddenFrom;
+
+        // The HiddenItems setting, read again only when it has changed.
+        internal static bool IsHidden(string name)
+        {
+            var setting = Settings.HiddenItems.Value ?? "";
+            if (hiddenItems == null || hiddenFrom != setting)
+            {
+                hiddenFrom = setting;
+                hiddenItems = new HashSet<string>(setting.Split(',').Select(WeatherNotes.Key).Where(key => key.Length > 0));
+            }
+
+            return hiddenItems.Count > 0 && hiddenItems.Contains(WeatherNotes.Key(name));
+        }
+
         private static MenuEntry Row(Terminal terminal, Catalog catalog, Target target, string name, int fullPrice, int sale, int owned, string kind, Sprite picture)
         {
+            if (!showHidden && IsHidden(name))
+            {
+                return null;
+            }
+
             // Rounded the way the game rounds when it takes the money.
             var price = (int)(fullPrice * (sale / 100f));
             var shownPrice = sale < 100 ? $"-{100 - sale}% ${price}" : "$" + price;

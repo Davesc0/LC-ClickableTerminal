@@ -98,8 +98,7 @@ namespace ClickableTerminal
             internal string Answer;
         }
 
-        // Every line is bought the way "confirm" buys it, without the question pages. The game's checks and every mod
-        // that acts on a purchase still run.
+        // Every line is bought the way "confirm" buys it, without the question pages. The game's checks and every mod that acts on a purchase still run.
         private static bool ordering;
 
         internal static void Order(Terminal terminal)
@@ -114,8 +113,7 @@ namespace ClickableTerminal
             terminal.StartCoroutine(OrderLines(terminal, Cart.Lines.ToList()));
         }
 
-        // One line a frame, so mods that act on a purchase (instant delivery, their own prices) finish one before the
-        // next.
+        // One line a frame, so mods that act on a purchase (instant delivery, their own prices) finish one before the next.
         private static System.Collections.IEnumerator OrderLines(Terminal terminal, List<KeyValuePair<int, int>> cart)
         {
             var catalog = Catalog.Read(terminal);
@@ -200,7 +198,7 @@ namespace ClickableTerminal
 
             if (refused.Count > 0)
             {
-                text.Append(bought.Count > 0 ? "\n" : "").Append("NOT ORDERED (still in the cart)\n");
+                text.Append(bought.Count > 0 ? "\n" : "").Append("NOT ORDERED (still in the cart)").Append('\n');
                 foreach (var line in refused)
                 {
                     text.Append(line.Amount - line.Bought).Append("x ").Append(line.Name);

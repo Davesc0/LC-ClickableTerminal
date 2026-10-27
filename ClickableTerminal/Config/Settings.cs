@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BepInEx.Configuration;
+using UnityEngine.InputSystem;
 
 namespace ClickableTerminal
 {
@@ -9,14 +10,6 @@ namespace ClickableTerminal
         Count,
         Kinds,
         Places
-    }
-
-    internal enum ExtrasPlace
-    {
-        Off,
-        OwnPage,
-        OtherPage,
-        StatusPanel
     }
 
     internal enum ShowHidden
@@ -31,13 +24,15 @@ namespace ClickableTerminal
     {
         internal static ConfigEntry<bool> OwnPages;
         internal static ConfigEntry<bool> AppsInWindow;
+        internal static ConfigEntry<Key> SwitchKey;
         internal static ConfigEntry<bool> SkipWelcome;
         internal static ConfigEntry<bool> SharpTerminal;
         internal static ConfigEntry<bool> ZoomToScreen;
         internal static ConfigEntry<float> CursorSpeed;
         internal static ConfigEntry<bool> LineScroll;
         internal static ConfigEntry<int> ScrollLines;
-        internal static ConfigEntry<ExtrasPlace> Extras;
+        internal static ConfigEntry<bool> ShipControls;
+        internal static ConfigEntry<bool> RandomMoon;
         internal static ConfigEntry<MonsterDetail> Monsters;
         internal static ConfigEntry<bool> RememberLastPage;
         internal static ConfigEntry<bool> ScreenAlwaysOn;
@@ -56,10 +51,14 @@ namespace ClickableTerminal
         internal static readonly ConfigEntry<string>[] CategoryItems = new ConfigEntry<string>[ItemCategories.Slots];
         internal static readonly ConfigEntry<string>[] CategoryKeywords = new ConfigEntry<string>[ItemCategories.Slots];
         internal static ConfigEntry<string> HiddenStoreCategories;
+        internal static ConfigEntry<string> CategoryOrder;
+        internal static ConfigEntry<string> HiddenItems;
 
         internal static ConfigEntry<bool> ShowAllCreatures;
         internal static ConfigEntry<bool> GroupCreaturesByAuthor;
         internal static ConfigEntry<string> ExtraCommands;
+
+        internal static ConfigEntry<bool> ModColors;
 
         // The config file sorts sections by name.
         private const string General = "1. General";
@@ -78,6 +77,9 @@ namespace ClickableTerminal
                 "Show the screens of mods made with the Interactive Terminal API (Lategame Upgrades and others) in a window " +
                 "over the page they were opened from, with the mouse and the controller working on them. " +
                 "Off: they take the whole screen, as they draw themselves.");
+            SwitchKey = config.Bind(General, "SwitchKey", Key.LeftAlt,
+                "Switches between the menus and the game's own screen while you are at the terminal, until the game is closed. " +
+                "Either Alt works when this is LeftAlt or RightAlt. On a controller: pressing the right stick. None: no key.");
             SkipWelcome = config.Bind(General, "SkipWelcome", false,
                 "Skip the welcome screen and open the main menu right away.");
             SharpTerminal = config.Bind(General, "SharpTerminal", true,
@@ -93,16 +95,15 @@ namespace ClickableTerminal
                 "Open the terminal on the page you left it on, instead of the main menu. Questions are not reopened.");
             ScreenAlwaysOn = config.Bind(General, "ScreenAlwaysOn", false,
                 "Keep the terminal's screen and light on when nobody is using it, showing the last page. Only on your side.");
-            Extras = config.Bind(General, "Extras", ExtrasPlace.OwnPage,
-                "The ship's doors, teleporters, lights and lever, and a random moon, pressed from the terminal. " +
-                "OwnPage: as EXTRAS on the main menu. OtherPage: at the end of OTHER. " +
-                "StatusPanel: as buttons at the bottom of the STATUS panel beside the main menu, OTHER and MODS. Off: nowhere.");
-            Monsters = config.Bind(General, "Monsters", MonsterDetail.Kinds,
-                "How much the MONSTERS button among the extras tells about what is alive on the moon.\n" +
-                "  Off     no such button\n" +
-                "  Count   only how many there are\n" +
-                "  Kinds   what they are, and how many of each\n" +
-                "  Places  also how many of each are inside the building and outside");
+            ShipControls = config.Bind(General, "ShipControls", true,
+                "The ship's teleporters, doors, lights and lever as buttons at the bottom of the STATUS panel " +
+                "(beside the main menu, OTHER and MODS).");
+            RandomMoon = config.Bind(General, "RandomMoon", true,
+                "A RANDOM button on MOONS, beside SETTINGS: picks a moon you can fly to and afford.");
+            Monsters = config.Bind(General, "MonsterScan", MonsterDetail.Kinds,
+                "How much MONSTER SCAN on the OTHER page tells about what is alive on the moon. " +
+                "Off: no such button. Count: only how many there are. Kinds: what they are, and how many of each. " +
+                "Places: also how many of each are inside the building and outside.");
             LineScroll = config.Bind(General, "LineScroll", true,
                 "On the pages the game prints as text, scroll a few lines at a time instead of a third of the page. " +
                 "Stands aside when Terminal Scroll Patch is installed.");
@@ -117,12 +118,10 @@ namespace ClickableTerminal
                 "Write to the log which pages the terminal loads and what it shows. Turn it on when you report a bug.");
 
             ShowHiddenMoons = config.Bind(Moons, "ShowHiddenMoons", ShowHidden.Never,
-                "When to list the moons that are kept off the catalogue, like Embrion and Artifice, or the ones a mod has hidden.\n" +
-                "  Never       they stay secret, you have to know the name\n" +
-                "  AfterOrbit  listed once this save has flown there\n" +
-                "  Mystery     listed as ??? until this save has flown there, then by name\n" +
-                "  Always      listed from the start");
-            ShowLockedMoons = config.Bind(Moons, "ShowLockedMoons", true,
+                "When to list the moons that are kept off the catalogue, like Embrion and Artifice, or the ones a mod has hidden. " +
+                "Never: they stay secret, you have to know the name. AfterOrbit: listed once this save has flown there. " +
+                "Mystery: listed as ??? until this save has flown there, then by name. Always: listed from the start.");
+            ShowLockedMoons = config.Bind(Moons, "ShowLockedMoons", false,
                 "List the moons a mod has locked: they are known, but nobody can fly there yet. They get a padlock after the name.");
             GroupMoonsByAuthor = config.Bind(Moons, "GroupMoonsByAuthor", false,
                 "Split the moon list into sections by who made the moons: the game's own first, then one section per author. " +
@@ -130,20 +129,30 @@ namespace ClickableTerminal
             SellingMoons = config.Bind(Moons, "SellingMoons", "Galetry, Shutter, Oxyde, Cordillera",
                 "Moons that buy scrap like the Company does, comma separated. They are listed with the Company under COMPANY MOONS at the top of the moon list. " +
                 "A name that no installed moon has is simply skipped.");
+            ModColors = config.Bind(Moons, "ModColors", false,
+                "Weathers in the colours WeatherRegistry gives them, and contracts in Contracted's colour. Off: everything in the terminal's colour.");
 
             ManageDecorations = config.Bind(Store, "ManageDecorations", true,
                 "Let this mod set how many decorations and suits are on sale (DecorationsOnOffer). " +
                 "Off: the selection is left to the game or to another mod. Always off while StoreRotationConfig is installed.");
-            DecorationsOnOffer = config.Bind(Store, "DecorationsOnOffer", 0, new ConfigDescription(
+            DecorationsOnOffer = config.Bind(Store, "DecorationsOnOffer", -1, new ConfigDescription(
                 "How many decorations and suits are on sale each quota. 0 leaves it to the game (four or five), " +
                 "-1 puts every one of them on sale at once. This changes what can be bought, not only what is listed, " +
                 "so everyone in the lobby should have the same number. It takes effect the next time the store's selection changes.",
                 new AcceptableValueRange<int>(-1, 40)));
             HiddenStoreCategories = config.Bind(Store, "HiddenStoreCategories", "",
                 "Parts of the store that are not listed, comma separated. Example: DECORATIONS, SUITS");
+            HiddenItems = config.Bind(Store, "HiddenItems", "",
+                "Things the store does not list, by name, comma separated: items, vehicles, upgrades, decorations, suits. " +
+                "For what another mod hides from the game's own store text. They can still be bought by typing. " +
+                "Capitals, spaces and punctuation do not matter. Example: Jetpack, Pro-flashlight, Cruiser");
 
             CategorizeItems = config.Bind(Store, "CategorizeItems", true,
                 "Sort the items into categories (LIGHTING, MELEE, FIREARMS...). Off: one ITEMS section with everything in it.");
+
+            CategoryOrder = config.Bind(Categories, "Category order", "",
+                "The order of the categories in the store, by their numbers below, comma separated, like 3, 1, 2. " +
+                "Categories left out follow in their own order.");
 
             for (var slot = 0; slot < ItemCategories.Slots; slot++)
             {

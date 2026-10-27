@@ -3,3 +3,8 @@ obj/
 .vs/
 dist/
 *.user
+TestResults/
+pack.ps1
+Tests/
+TODO.md
+wiki/

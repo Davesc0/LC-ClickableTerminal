@@ -14,7 +14,7 @@ namespace ClickableTerminal
         private const string SetCommand = "setinside ";
 
         // "Forcing Interior Mineshaft (4) to be loaded!", the answer to "setinside 4".
-        private static readonly Regex Answer = new Regex(@"^Forcing Interior (.+) \((\d+)\) to be loaded", RegexOptions.Compiled);
+        internal static readonly Regex Answer = new Regex(@"^Forcing Interior (.+) \((\d+)\) to be loaded", RegexOptions.Compiled);
 
         // For when the mod's own state cannot be read.
         private static string clicked;

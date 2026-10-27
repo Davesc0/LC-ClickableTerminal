@@ -18,14 +18,14 @@ namespace ClickableTerminal
         internal const string Guid = "GJ.ScrapBank";
 
         private static readonly Regex Tags = new Regex("<[^>]+>", RegexOptions.Compiled);
-        private static readonly Regex Heading = new Regex(@"^=+\s*(.*?)\s*=+$", RegexOptions.Compiled);
+        internal static readonly Regex Heading = new Regex(@"^=+\s*(.*?)\s*=+$", RegexOptions.Compiled);
         private static readonly Regex Paged = new Regex(@"(\d+)\s*/\s*(\d+)\s*$", RegexOptions.Compiled);
 
         // " 3. Cash register x2       $120"
-        private static readonly Regex Numbered = new Regex(@"^(\d+)\.\s+(.+?)\s+(\$[\d,.]+)$", RegexOptions.Compiled);
+        internal static readonly Regex Numbered = new Regex(@"^(\d+)\.\s+(.+?)\s+(\$[\d,.]+)$", RegexOptions.Compiled);
 
         // "2 / ALL = ..." once the mod's other language is stripped
-        private static readonly Regex Choice = new Regex(@"^(\d+)\s*/\s*([A-Z]+)", RegexOptions.Compiled);
+        internal static readonly Regex Choice = new Regex(@"^(\d+)\s*/\s*([A-Z]+)", RegexOptions.Compiled);
         private static readonly Regex Leftover = new Regex(@"(\s*/\s*)+(?=\s*[:=]|\s*$)", RegexOptions.Compiled);
         private static readonly Regex Spaces = new Regex(@"\s{2,}", RegexOptions.Compiled);
 
@@ -356,7 +356,7 @@ namespace ClickableTerminal
         }
 
         // The mod prints every line in two languages, and the terminal font only has the letters of one.
-        private static string Clean(string line)
+        internal static string Clean(string line)
         {
             var kept = new StringBuilder(line.Length);
             foreach (var c in line)

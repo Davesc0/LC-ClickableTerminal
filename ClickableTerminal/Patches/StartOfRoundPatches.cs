@@ -5,18 +5,29 @@ namespace ClickableTerminal.Patches
     [HarmonyPatch(typeof(StartOfRound))]
     internal static class StartOfRoundPatches
     {
+        [HarmonyPatch(nameof(StartOfRound.Awake))]
+        [HarmonyPostfix]
+        private static void NewLobby()
+        {
+            MoonMemory.Forget();
+        }
+
         [HarmonyPatch(nameof(StartOfRound.ArriveAtLevel))]
         [HarmonyPostfix]
         private static void RememberFlight(StartOfRound __instance)
         {
             MoonMemory.RememberFlight(__instance.currentLevel);
         }
+    }
 
-        [HarmonyPatch(nameof(StartOfRound.OnShipLandedMiscEvents))]
+    [HarmonyPatch(typeof(GameNetworkManager))]
+    internal static class SavePatches
+    {
+        [HarmonyPatch(nameof(GameNetworkManager.SaveItemsInShip))]
         [HarmonyPostfix]
-        private static void RememberLanding(StartOfRound __instance)
+        private static void SaveMoons()
         {
-            MoonMemory.RememberLanding(__instance.currentLevel);
+            MoonMemory.Save();
         }
     }
 }

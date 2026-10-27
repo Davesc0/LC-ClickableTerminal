@@ -23,7 +23,7 @@ namespace ClickableTerminal
             var window = new Window { Title = title, Text = Window.Tidy(answer, "") };
             var node = terminal.currentNode;
             // A command another mod broke asks nothing.
-            var failed = answer.StartsWith("[Another mod failed");
+            var failed = answer.Contains("[Another mod failed");
             var asks = !failed && forced || ResultPages.AsksToConfirm(answer)
                        || (node != null && node.overrideOptions && node.terminalOptions != null
                            && node.terminalOptions.Any(option => option?.noun != null && option.noun.word == "confirm"));

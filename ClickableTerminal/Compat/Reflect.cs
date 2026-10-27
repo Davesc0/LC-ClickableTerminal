@@ -3,8 +3,7 @@ using System.Collections.Generic;
 
 namespace ClickableTerminal
 {
-    // HarmonyLib's TypeByName walks every type of every mod when a name is missing, which takes seconds in a big
-    // modpack. Asking each assembly directly is quick.
+    // HarmonyLib's TypeByName walks every type of every mod when a name is missing, which takes seconds in a big modpack. Asking each assembly directly is quick.
     internal static class Reflect
     {
         private static readonly Dictionary<string, Type> Known = new Dictionary<string, Type>();

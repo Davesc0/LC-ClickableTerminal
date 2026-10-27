@@ -10,7 +10,7 @@ namespace ClickableTerminal
         internal const string Guid = "cucumis.lethalrpg";
 
         // "* Stamina      Lv 0/5   $50   -"
-        private static readonly Regex Upgrade = new Regex(@"^\*\s+(.+?)\s{2,}Lv\s*(\d+)\s*/\s*(\d+)", RegexOptions.Compiled);
+        internal static readonly Regex Upgrade = new Regex(@"^\*\s+(.+?)\s{2,}Lv\s*(\d+)\s*/\s*(\d+)", RegexOptions.Compiled);
         private static readonly Regex Tags = new Regex("<[^>]+>", RegexOptions.Compiled);
 
         private static readonly string[] Footer = { "Pages:", "Buy:", "More:", "Skill menu:" };

@@ -96,6 +96,7 @@ namespace ClickableTerminal
         {
             Plugin.Debug("Runs in the background: " + string.Join(", ", commands));
             var before = terminal.currentNode;
+            var shown = Shown(terminal);
             var ran = Run(terminal, () =>
             {
                 foreach (var command in commands)
@@ -105,7 +106,7 @@ namespace ClickableTerminal
             });
 
             // Another mod failed before anything was printed: the screen only holds what was there before.
-            var answer = TakeScreen(terminal);
+            var answer = TakeScreen(terminal, shown);
             return ran || terminal.currentNode != before
                 ? answer
                 : "[Another mod failed while this command ran, so it did nothing. The BepInEx log has its error.]";
@@ -115,8 +116,9 @@ namespace ClickableTerminal
         internal static string Act(Terminal terminal, TerminalNode confirmed, int amount)
         {
             terminal.playerDefinedAmount = amount;
+            var shown = Shown(terminal);
             Run(terminal, () => terminal.LoadNewNodeIfAffordable(confirmed));
-            return TakeScreen(terminal);
+            return TakeScreen(terminal, shown);
         }
 
         // Another mod throwing in its own patch must not keep the answer from showing. Its error is only logged.
@@ -148,13 +150,22 @@ namespace ClickableTerminal
             }
         }
 
-        private static string TakeScreen(Terminal terminal)
+        // The page on the screen, without what is being typed.
+        private static string Shown(Terminal terminal)
+        {
+            var text = terminal.screenText.text;
+            return text.Substring(0, Mathf.Clamp(text.Length - terminal.textAdded, 0, text.Length));
+        }
+
+        // The answer is taken off the screen and the page that was there before is put back, so the game's own screen behind ours (seen with the switch key) never stays empty. An application keeps the screen it drew.
+        private static string TakeScreen(Terminal terminal, string before)
         {
             var answer = terminal.screenText.text.Trim('\n', '\r', ' ');
+            var back = InteractiveTerminal.Running() ? terminal.screenText.text : before;
             terminal.modifyingText = true;
-            terminal.screenText.text = "";
+            terminal.screenText.text = back;
             terminal.modifyingText = false;
-            terminal.currentText = "";
+            terminal.currentText = back;
             terminal.textAdded = 0;
             return answer;
         }

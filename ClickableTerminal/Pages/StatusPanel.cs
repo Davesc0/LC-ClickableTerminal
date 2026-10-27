@@ -40,7 +40,7 @@ namespace ClickableTerminal
                 {
                     var weather = round.currentLevel.currentWeather;
                     panel.Facts.Add(new Fact { Label = "Moon", Value = MoonsPage.NameOf(round.currentLevel) });
-                    panel.Facts.Add(new Fact { Label = "Weather", Value = weather == LevelWeatherType.None ? "Clear" : weather.ToString() });
+                    panel.Facts.Add(new Fact { Label = "Weather", Value = Tint.Weather(weather) });
                 }
             }
 
@@ -49,17 +49,9 @@ namespace ClickableTerminal
                 panel.Facts.Add(new Fact { Label = "Deaths", Value = stats.deaths.ToString() });
             }
 
-            if (Settings.Extras.Value == ExtrasPlace.StatusPanel)
+            if (Settings.ShipControls.Value)
             {
-                foreach (var entry in ExtrasPage.Entries(terminal))
-                {
-                    panel.Buttons.Add(new ToolButton
-                    {
-                        Label = entry.LiveLabel != null ? entry.LiveLabel() : entry.Label,
-                        Click = entry.Click ?? (entry.Open != null ? () => Navigator.Open(entry.Open) : (System.Action)null),
-                        Primary = true
-                    });
-                }
+                ShipControls.AddTo(panel);
             }
 
             return panel;
@@ -87,17 +79,32 @@ namespace ClickableTerminal
             return $"{hour}:{minutes % 60:00} {half}";
         }
 
+        private static int scrapOnShip;
+        private static float scrapCounted = -100f;
+
+        // Counted again only when the game has moved scrap (Patches.ShipWatch), or now and then for what a mod might move on its own.
         private static int ScrapOnShip()
         {
+            if (!Patches.ShipWatch.ScrapMoved && Time.unscaledTime - scrapCounted < 30f)
+            {
+                return scrapOnShip;
+            }
+
+            Patches.ShipWatch.ScrapMoved = false;
+            scrapCounted = Time.unscaledTime;
             var total = 0;
             foreach (var item in Object.FindObjectsOfType<GrabbableObject>())
             {
-                if (item != null && item.itemProperties != null && item.itemProperties.isScrap && item.isInShipRoom)
+                // Counted the way GeneralImprovements' ship monitor counts it, so the two show the same sum: no bodies, no scrap without a value, no stun grenade that has gone off.
+                if (item != null && item.itemProperties != null && item.itemProperties.isScrap && item.itemProperties.minValue > 0
+                    && item.isInShipRoom && item.isInElevator && !(item is RagdollGrabbableObject)
+                    && !(item is StunGrenadeItem grenade && grenade.hasExploded && grenade.DestroyGrenade))
                 {
                     total += item.scrapValue;
                 }
             }
 
+            scrapOnShip = total;
             return total;
         }
     }
